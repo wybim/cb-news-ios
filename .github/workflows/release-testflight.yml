@@ -40,6 +40,13 @@ jobs:
     # env) để MỌI step trong job đều thấy, không riêng step nào.
     env:
       GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
+      # Task 274 (BLI 258): app.config.js chưa từng khai ios.buildNumber trước bản vá
+      # này (Expo mặc định CFBundleVersion="1" mọi lần prebuild) — dùng run_number của
+      # chính workflow này để đảm bảo mỗi lần chạy ra một buildNumber duy nhất, tránh
+      # Apple từ chối trùng bản build. Đặt cấp JOB (không phải step) — đúng bài học Task
+      # 272 đã ghi ngay trên: biến chỉ đặt ở env một step thì bước archive phía sau
+      # (chạy lại app.config.js) sẽ không thấy.
+      IOS_BUILD_NUMBER: ${{ github.run_number }}
     steps:
       - name: Lấy mã nguồn (checkout)
         uses: actions/checkout@v4
@@ -85,6 +92,18 @@ jobs:
 
       - name: Đối chiếu cú pháp altool thật trên runner (bằng chứng tại chỗ, không chỉ tài liệu)
         run: xcrun altool --help 2>&1 | head -80 || true
+
+      - name: Đo nền — liệt kê build hiện có trên App Store Connect (Task 274, DoD mục 1)
+        # Chạy SỚM (trước xcodebuild archive tốn ~10-20 phút) để phát hiện ngay nếu JWT/
+        # khoá ASC sai, tránh tốn phút runner macOS cho một lần chạy chắc chắn hỏng ở
+        # bước cuối. Không nộp gì lên Apple, chỉ đọc (GET), an toàn tuyệt đối để chạy lại.
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          BUNDLE_ID: com.cbcentres.cbnews
+        run: |
+          export ASC_PRIVATE_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          node scripts/list-builds.js
 
       - name: Build .xcarchive có ký số tự động (App Store Connect API key)
         working-directory: ios
@@ -148,6 +167,31 @@ jobs:
           echo "Dang upload: $IPA_PATH"
           xcrun altool --upload-app -f "$IPA_PATH" -t ios \
             --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Đọc số hiệu build vừa archive (CFBundleVersion, CFBundleShortVersionString)
+        id: build-info
+        run: |
+          APP_PATH=$(find ios/build/CBNews.xcarchive/Products/Applications -name "*.app" | head -n1)
+          BUILD_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP_PATH/Info.plist")
+          MARKETING_VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP_PATH/Info.plist")
+          echo "build_version=$BUILD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "marketing_version=$MARKETING_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Chờ Apple xử lý xong build rồi gán vào nhóm TestFlight (Task 274, BLI 258)
+        # Gán vào "CB News Internal Testers" (id cố định, không phải bí mật — id một
+        # nhóm nội bộ, không lộ quyền truy cập gì thêm) để chủ dự án thử lại bản build
+        # có đường thu hồi token Apple đã nối. Nhóm internal testers không cần Apple
+        # Beta App Review, nên build khả dụng ngay khi processingState=VALID.
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          BUNDLE_ID: com.cbcentres.cbnews
+          BETA_GROUP_ID: "273ab72d-b8f8-41d7-a9cd-78a78f4ee88e"
+          BUILD_VERSION: ${{ steps.build-info.outputs.build_version }}
+          MARKETING_VERSION: ${{ steps.build-info.outputs.marketing_version }}
+        run: |
+          export ASC_PRIVATE_KEY_PATH="$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8"
+          node scripts/assign-testflight-build.js
 
       - name: Lưu .ipa đã ký làm artifact của workflow
         if: always()

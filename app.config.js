@@ -9,6 +9,14 @@
 // khoá + hiện thông báo "cấu hình chưa sẵn sàng" (xem src/config/env.ts).
 const GOOGLE_IOS_CLIENT_ID = process.env.GOOGLE_IOS_CLIENT_ID ?? '';
 
+// Task 274 (BLI 258): trước bản vá này KHÔNG có "ios.buildNumber" khai báo — Expo mặc
+// định CFBundleVersion="1" cho mọi lần prebuild, nên 3 bản build đã có trên App Store
+// Connect (Task 268/271/272) nhiều khả năng cùng buildNumber (đo lại bằng API thật lúc
+// build ở release-testflight.yml, không suy diễn suông). Lấy từ biến môi trường để mỗi
+// lần chạy workflow ra một số khác nhau, tránh Apple từ chối trùng bản build; giữ '1'
+// khi build cục bộ (không đặt biến) để không đổi hành vi build thường ngày.
+const IOS_BUILD_NUMBER = process.env.IOS_BUILD_NUMBER ?? '1';
+
 // Gói @react-native-google-signin/google-signin (bản không dùng Firebase) BẮT BUỘC
 // một "iosUrlScheme" hợp lệ dạng "com.googleusercontent.apps.<id>" ngay tại thời điểm
 // prebuild, nếu không plugin ném lỗi và cả app không build được — kể cả khi chưa có
@@ -34,6 +42,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.cbcentres.cbnews',
+      buildNumber: IOS_BUILD_NUMBER,
       // Task 268 (đợt 5a): app chỉ gọi HTTPS tiêu chuẩn (TLS có sẵn của hệ điều hành,
       // không tự cài thuật toán mã hoá riêng) nên khai "không dùng mã hoá phải khai báo
       // xuất khẩu" ngay trong app.config.js. Thiếu khai báo này thì bản build đứng chờ

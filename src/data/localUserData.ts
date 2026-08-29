@@ -2,6 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACCOUNT_STORAGE_KEY } from '../state/accountStore';
 import { SAVED_ARTICLES_STORAGE_KEY } from './savedArticles';
+import { APPLE_AUTH_CODE_STORAGE_KEY } from '../auth/appleAuth';
 
 /**
  * MỌI khoá lưu trữ trên máy chứa dữ liệu người dùng của CB News.
@@ -23,6 +24,10 @@ export type LocalUserDataEntry = { key: string; backend: LocalUserDataBackend };
 export const LOCAL_USER_DATA_KEYS: readonly LocalUserDataEntry[] = [
   { key: ACCOUNT_STORAGE_KEY, backend: 'secure-store' },
   { key: SAVED_ARTICLES_STORAGE_KEY, backend: 'async-storage' },
+  // Task 274: mã uỷ quyền Apple (authorizationCode) giữ lại để gọi Worker thu hồi
+  // token lúc xoá tài khoản — thiếu dòng này thì xoá tài khoản để sót mã lại trong
+  // Keychain, vi phạm đúng cam kết "xoá sạch dữ liệu" app hiển thị cho người dùng.
+  { key: APPLE_AUTH_CODE_STORAGE_KEY, backend: 'secure-store' },
 ];
 
 /**
