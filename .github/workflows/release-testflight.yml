@@ -1,0 +1,147 @@
+name: Release iOS (ký số) lên TestFlight
+
+# Đợt 5a (Task 268, BLI 258 DoD mục 2): nhánh build CÓ ký số, tải thẳng lên
+# App Store Connect / TestFlight. Nhánh build KHÔNG ký số ở build-ios.yml giữ
+# nguyên y hệt — đây là chỗ lùi nếu nhánh ký số này hỏng, KHÔNG được đụng vào.
+#
+# Đường ký số: Xcode automatic ("cloud") signing bằng App Store Connect API key,
+# qua xcodebuild -allowProvisioningUpdates -authenticationKey*. Nguồn: Apple WWDC21
+# "Distribute apps in Xcode with cloud signing" — developer.apple.com/videos/play/wwdc2021/10204/
+# (transcript ghi rõ 4 cờ: -authenticationKeyIssuerID, -authenticationKeyID,
+# -authenticationKeyPath, -allowProvisioningUpdates). Upload bằng `xcrun altool
+# --upload-app --apiKey --apiIssuer` — altool là 1 trong 3 công cụ CLI Apple liệt kê
+# chính thức ở developer.apple.com/help/app-store-connect/manage-builds/upload-builds/.
+#
+# Chạy thủ công (workflow_dispatch) — không tự chạy theo mỗi lần push, tránh tốn
+# phút runner macOS ngoài ý muốn khi chỉ đang thử nghiệm đường ký số.
+on:
+  workflow_dispatch:
+
+env:
+  # Team ID tra được từ GET /v1/bundleIds?filter[identifier]=com.cbcentres.cbnews
+  # (attribute "seedId"). Không phải bí mật — Team ID hiện công khai trên mọi
+  # provisioning profile của app. INFER: seedId ≈ Team ID cho tài khoản một-team,
+  # theo mô tả "your team's seed ID" trong tài liệu tham chiếu API của Apple; chưa
+  # có xác nhận 1-1 tuyệt đối, đây là chỗ đầu tiên cần xem lại nếu build báo lỗi team.
+  ASC_TEAM_ID: "TGGA9S73LD"
+
+jobs:
+  release-testflight:
+    name: Ký số + upload TestFlight (xcodebuild cloud signing)
+    runs-on: macos-latest
+    steps:
+      - name: Lấy mã nguồn (checkout)
+        uses: actions/checkout@v4
+
+      - name: Cài Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Cài phụ thuộc npm (npm ci)
+        run: npm ci
+
+      - name: Sinh project iOS gốc (expo prebuild)
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Cài CocoaPods cho project iOS
+        working-directory: ios
+        run: pod install
+
+      - name: Xác định workspace và scheme Xcode
+        id: ios-project
+        working-directory: ios
+        run: |
+          WORKSPACE=$(ls -d *.xcworkspace | head -n1)
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+
+      - name: Giải mã khoá App Store Connect API vào thư mục chuẩn của altool
+        env:
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+        run: |
+          mkdir -p ~/.appstoreconnect/private_keys
+          echo "$ASC_KEY_P8_BASE64" | base64 --decode > ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+          chmod 600 ~/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8
+
+      - name: Đối chiếu cú pháp altool thật trên runner (bằng chứng tại chỗ, không chỉ tài liệu)
+        run: xcrun altool --help 2>&1 | head -80 || true
+
+      - name: Build .xcarchive có ký số tự động (App Store Connect API key)
+        working-directory: ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild archive \
+            -workspace "${{ steps.ios-project.outputs.workspace }}" \
+            -scheme "${{ steps.ios-project.outputs.scheme }}" \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/CBNews.xcarchive \
+            CODE_SIGN_STYLE=Automatic \
+            DEVELOPMENT_TEAM="$ASC_TEAM_ID" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Ghi ExportOptions.plist (method app-store-connect, ký tự động)
+        working-directory: ios
+        run: |
+          cat > ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>app-store-connect</string>
+              <key>signingStyle</key>
+              <string>automatic</string>
+              <key>teamID</key>
+              <string>${ASC_TEAM_ID}</string>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Xuất .ipa đã ký (xcodebuild -exportArchive)
+        working-directory: ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/CBNews.xcarchive \
+            -exportPath build/ipa \
+            -exportOptionsPlist ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_${ASC_KEY_ID}.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: Tải .ipa lên App Store Connect / TestFlight (altool)
+        working-directory: ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+        run: |
+          IPA_PATH=$(find build/ipa -name "*.ipa" | head -n1)
+          echo "Dang upload: $IPA_PATH"
+          xcrun altool --upload-app -f "$IPA_PATH" -t ios \
+            --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+
+      - name: Lưu .ipa đã ký làm artifact của workflow
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cb-news-ios-signed-ipa
+          path: ios/build/ipa/*.ipa
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Dọn khoá App Store Connect API khỏi runner
+        if: always()
+        run: rm -rf ~/.appstoreconnect/private_keys

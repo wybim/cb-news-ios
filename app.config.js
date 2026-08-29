@@ -34,6 +34,16 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.cbcentres.cbnews',
+      // Task 268 (đợt 5a): app chỉ gọi HTTPS tiêu chuẩn (TLS có sẵn của hệ điều hành,
+      // không tự cài thuật toán mã hoá riêng) nên khai "không dùng mã hoá phải khai báo
+      // xuất khẩu" ngay trong app.config.js. Thiếu khai báo này thì bản build đứng chờ
+      // App Store Connect hỏi thủ công, treo cả round TestFlight. Trường đúng chuẩn Expo
+      // v57 cho việc này là "ios.config.usesNonExemptEncryption" — Expo tự đặt
+      // ITSAppUsesNonExemptEncryption trong Info.plist, nguồn:
+      // docs.expo.dev/versions/v57.0.0/config/app/ (mục ios.config.usesNonExemptEncryption).
+      config: {
+        usesNonExemptEncryption: false,
+      },
     },
     android: {
       adaptiveIcon: {
