@@ -56,6 +56,46 @@ function formatFullName(
   return parts.length > 0 ? parts.join(' ') : null;
 }
 
+/**
+ * Task 275 (BLI 258, đợt 3e — bản THĂM DÒ, không phải tính năng): đo trụ chịu lực của
+ * AD-2 — xem attachment `ad-luong-token-apple.md` (work item 258, id
+ * `0777288c-6d61-4c30-adde-88fbb0b20378`), mục 7 điều-chưa-biết #1: "Lần xác thực Apple
+ * thứ hai (khi app đã được cấp quyền) có trả `authorizationCode` dùng được không —
+ * đây là trụ chịu lực của cả AD-2". Sập câu hỏi này thì AD-2 phải rơi về phương án B
+ * (AD-8) kèm sửa chính sách nặng hơn — nên phải đo TRƯỚC khi viết mã Worker thật.
+ *
+ * Hàm THUẦN LOGIC, không đụng Alert/UI — test được bằng cách mock
+ * `expo-apple-authentication`, giống `signInWithApple()` ở trên, không cần thiết bị
+ * hay simulator thật. Kết quả trả về KHÔNG BAO GIỜ chứa giá trị mã dưới bất kỳ hình
+ * thức nào khác ngoài `length` — rào an toàn Task 275: không hiện, không log, không
+ * gửi giá trị mã đi đâu.
+ */
+export type AppleSignInProbeResult =
+  | { kind: 'has-code'; length: number }
+  | { kind: 'no-code' }
+  | { kind: 'cancelled' }
+  | { kind: 'error'; errorName: string };
+
+export async function probeSecondAppleSignIn(): Promise<AppleSignInProbeResult> {
+  try {
+    const credential = await AppleAuthentication.signInAsync({
+      requestedScopes: [
+        AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+        AppleAuthentication.AppleAuthenticationScope.EMAIL,
+      ],
+    });
+    const code = credential.authorizationCode;
+    return code ? { kind: 'has-code', length: code.length } : { kind: 'no-code' };
+  } catch (err: unknown) {
+    const errCode = (err as { code?: string } | null)?.code;
+    if (errCode === 'ERR_REQUEST_CANCELED') {
+      return { kind: 'cancelled' };
+    }
+    const errorName = errCode ?? (err instanceof Error ? err.name : 'unknown');
+    return { kind: 'error', errorName };
+  }
+}
+
 export async function signInWithApple(): Promise<AppleSignInResult> {
   const available = await isAppleSignInAvailable();
   if (!available) {

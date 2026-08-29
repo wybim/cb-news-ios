@@ -61,6 +61,16 @@ jest.mock('@react-native-google-signin/google-signin', () => ({
   statusCodes: { SIGN_IN_CANCELLED: 'SIGN_IN_CANCELLED' },
 }));
 
+// Task 275: deleteAccount() nhánh Apple giờ còn chạy bước thăm dò
+// (runDeleteAccountProbe()), hiện kết quả qua Alert.alert — cần mock 'react-native' để
+// require() không đụng vào mã gốc chưa qua Metro transform (test này KHÔNG tập trung
+// vào bước thăm dò, chỉ cần không vỡ vì import mới — xem deleteAccount.probe-failure.test.ts
+// và appleAuth.probe.test.ts để kiểm bước thăm dò).
+jest.mock('react-native', () => ({
+  __esModule: true,
+  Alert: { alert: jest.fn() },
+}));
+
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as SecureStore from 'expo-secure-store';
 import { signInWithApple, getAppleAuthorizationCode } from '../appleAuth';
