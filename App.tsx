@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { accountStore, useAccountState } from './src/state/accountStore';
+import { savedArticlesStore } from './src/data/savedArticles';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 
@@ -10,6 +11,9 @@ export default function App() {
 
   useEffect(() => {
     void accountStore.hydrate();
+    // Bài đã lưu offline (Task 267) phải sẵn sàng trước khi ArticleScreen cần fallback —
+    // hydrate song song, không phụ thuộc trạng thái đăng nhập.
+    void savedArticlesStore.hydrate();
   }, []);
 
   return (

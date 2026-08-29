@@ -1,12 +1,10 @@
-import * as SecureStore from 'expo-secure-store';
 import { accountStore } from '../state/accountStore';
-import { LOCAL_USER_DATA_KEYS } from '../data/localUserData';
+import { clearAllLocalUserData } from '../data/localUserData';
 import { revokeGoogleAccess } from './googleAuth';
 
 /**
- * Xoá tài khoản (Apple Guideline 5.1.1(v)) — xoá sạch dữ liệu người dùng trên máy.
- * App không có máy chủ riêng nên "tài khoản" chỉ tồn tại trên máy; xoá xong là hết,
- * không có gì phía server để dọn thêm.
+ * Xoá tài khoản (Apple Guideline 5.1.1(v)) — xoá sạch dữ liệu người dùng trên máy, gồm cả
+ * bài đã lưu đọc offline (Task 267) chứ không chỉ dữ liệu tài khoản.
  *
  * Khác signOutCurrentSession(): với Google còn thu hồi quyền truy cập (revokeAccess)
  * chứ không chỉ ngắt phiên. Với Apple: KHÔNG có API thu hồi phía client cho native
@@ -18,12 +16,8 @@ export async function deleteAccount(): Promise<void> {
   if (current.status === 'signed-in' && current.provider === 'google') {
     await revokeGoogleAccess();
   }
-  for (const key of LOCAL_USER_DATA_KEYS) {
-    try {
-      await SecureStore.deleteItemAsync(key);
-    } catch {
-      // tiếp tục xoá các khoá còn lại dù một khoá lỗi
-    }
-  }
+  // Xoá TẤT CẢ khoá đã đăng ký ở LOCAL_USER_DATA_KEYS (mọi backend) — nguồn duy nhất,
+  // không tự lặp SecureStore ở đây để tránh quên khoá mới (đúng bẫy brief Task 267 cảnh báo).
+  await clearAllLocalUserData();
   await accountStore.signOut();
 }
