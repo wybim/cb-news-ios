@@ -1,0 +1,71 @@
+name: Build iOS (không ký số)
+
+# Đợt 2a: dựng khung build .ipa KHÔNG ký số trên runner macOS của GitHub Actions.
+# Ký số (certificate, provisioning profile, tài khoản Apple) thuộc đợt 5 — KHÔNG làm ở đây.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-ios:
+    name: Build .ipa không ký số trên macOS runner
+    runs-on: macos-latest
+    steps:
+      - name: Lấy mã nguồn (checkout)
+        uses: actions/checkout@v4
+
+      - name: Cài Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Cài phụ thuộc npm (npm ci)
+        run: npm ci
+
+      - name: Sinh project iOS gốc (expo prebuild)
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Cài CocoaPods cho project iOS
+        working-directory: ios
+        run: pod install
+
+      - name: Xác định workspace và scheme Xcode
+        id: ios-project
+        working-directory: ios
+        run: |
+          WORKSPACE=$(ls *.xcworkspace | head -n1)
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+
+      - name: Build app không ký số (xcodebuild)
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -workspace "${{ steps.ios-project.outputs.workspace }}" \
+            -scheme "${{ steps.ios-project.outputs.scheme }}" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Đóng gói .ipa không ký số (gói thủ công Payload/*.app)
+        working-directory: ios
+        run: |
+          APP_PATH=$(find build/Build/Products -name "*.app" | head -n1)
+          mkdir -p Payload
+          cp -r "$APP_PATH" Payload/
+          zip -r "${{ steps.ios-project.outputs.scheme }}-unsigned.ipa" Payload
+
+      - name: Lưu .ipa làm artifact của workflow
+        uses: actions/upload-artifact@v4
+        with:
+          name: cb-news-ios-unsigned-ipa
+          path: ios/*.ipa
+          retention-days: 14
