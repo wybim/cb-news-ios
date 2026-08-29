@@ -43,6 +43,17 @@ jobs:
         run: npm ci
 
       - name: Sinh project iOS gốc (expo prebuild)
+        # Task 271 (đợt 3b, BLI 258 DoD mục 2): app.config.js dòng 10 đọc
+        # process.env.GOOGLE_IOS_CLIENT_ID NGAY LÚC prebuild chạy (đây là bước duy
+        # nhất Expo đọc app.config.js để sinh project iOS gốc + Info.plist/URL
+        # scheme). Đặt biến ở bước khác (vd: bước build/export/upload) là vô ích vì
+        # app.config.js đã được đọc xong từ trước — biến rỗng ở đây thì nút Google
+        # bị khoá dù các bước sau vẫn xanh (lỗi im lặng, xem app.config.js dòng
+        # 1-24 và src/config/env.ts). Giá trị KHÔNG phải bí mật (client ID iOS
+        # không có client secret) nhưng vẫn nạp qua GitHub secret cho nhất quán với
+        # 3 biến ASC_* đang có.
+        env:
+          GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
         run: npx expo prebuild --platform ios --no-install
 
       - name: Cài CocoaPods cho project iOS
