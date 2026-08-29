@@ -29,6 +29,17 @@ jobs:
   release-testflight:
     name: Ký số + upload TestFlight (xcodebuild cloud signing)
     runs-on: macos-latest
+    # Task 272 (đợt 3b-2, BLI 258 DoD mục 2): Task 271 chỉ đặt GOOGLE_IOS_CLIENT_ID
+    # ở env của MỘT step (expo prebuild) — nhưng bước xcodebuild archive phía sau
+    # cũng khiến Expo chạy lại app.config.js (để sinh EXConstants.bundle/app.config,
+    # tệp app đọc lúc runtime qua Constants.expoConfig.extra, xem src/config/env.ts),
+    # và step đó KHÔNG thấy biến vì env chỉ có hiệu lực trong đúng step khai báo nó.
+    # Kết quả: build vẫn xanh, Info.plist (sinh lúc prebuild) có client ID thật, nhưng
+    # EXConstants.bundle/app.config (sinh lúc xcodebuild) vẫn rỗng — lỗi im lặng, Task
+    # 271 và PM cùng nghiệm thu nhầm vì chỉ soi Info.plist. Đặt biến ở đây (job-level
+    # env) để MỌI step trong job đều thấy, không riêng step nào.
+    env:
+      GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
     steps:
       - name: Lấy mã nguồn (checkout)
         uses: actions/checkout@v4
@@ -43,17 +54,11 @@ jobs:
         run: npm ci
 
       - name: Sinh project iOS gốc (expo prebuild)
-        # Task 271 (đợt 3b, BLI 258 DoD mục 2): app.config.js dòng 10 đọc
-        # process.env.GOOGLE_IOS_CLIENT_ID NGAY LÚC prebuild chạy (đây là bước duy
-        # nhất Expo đọc app.config.js để sinh project iOS gốc + Info.plist/URL
-        # scheme). Đặt biến ở bước khác (vd: bước build/export/upload) là vô ích vì
-        # app.config.js đã được đọc xong từ trước — biến rỗng ở đây thì nút Google
-        # bị khoá dù các bước sau vẫn xanh (lỗi im lặng, xem app.config.js dòng
-        # 1-24 và src/config/env.ts). Giá trị KHÔNG phải bí mật (client ID iOS
-        # không có client secret) nhưng vẫn nạp qua GitHub secret cho nhất quán với
-        # 3 biến ASC_* đang có.
-        env:
-          GOOGLE_IOS_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
+        # app.config.js dòng 10 đọc process.env.GOOGLE_IOS_CLIENT_ID — biến đã có
+        # sẵn từ env cấp job (khai báo phía trên jobs.release-testflight), nên step
+        # này thấy được mà không cần khai lại. Giá trị KHÔNG phải bí mật (client ID
+        # iOS không có client secret) nhưng vẫn nạp qua GitHub secret cho nhất quán
+        # với 3 biến ASC_* đang có.
         run: npx expo prebuild --platform ios --no-install
 
       - name: Cài CocoaPods cho project iOS
