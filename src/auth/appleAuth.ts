@@ -1,5 +1,4 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
-import * as SecureStore from 'expo-secure-store';
 
 /**
  * Sign in with Apple KHÔNG cần "client ID" cấu hình phía app (khác Google) — chỉ cần
@@ -11,28 +10,14 @@ import * as SecureStore from 'expo-secure-store';
  */
 
 /**
- * Task 274 (BLI 258, DoD "nối app vào Worker thu hồi token Apple"): Apple bắt buộc app
- * dùng Sign in with Apple phải gọi REST API thu hồi token khi xoá tài khoản (technote
- * TN3194) — muốn gọi được thì phải GIỮ `authorizationCode` từ lúc đăng nhập, vì Apple
- * chỉ cấp mã này đúng một lần tại đây. Trước bản vá này app lấy `credential` nhưng chỉ
- * dùng fullName/email/user rồi vứt bỏ authorizationCode — lỗ hổng gốc của Task 274.
- *
- * Cất vào Keychain (expo-secure-store) qua khoá RIÊNG, tách khỏi `accountStore`'s
- * ACCOUNT_STORAGE_KEY — không nhét vào cùng bản ghi tài khoản để tránh việc đọc trạng
- * thái tài khoản (`accountStore.getState()`, in ra UI/log ở bất kỳ đâu) vô tình kéo
- * theo mã uỷ quyền. Khoá này PHẢI có trong `LOCAL_USER_DATA_KEYS`
- * (src/data/localUserData.ts) — thiếu đăng ký thì xoá tài khoản sẽ để sót nó lại.
+ * Task 278 (BLI 258, đợt 3g — gỡ nợ AD-11): khoá này KHÔNG còn được ghi lúc đăng nhập
+ * và KHÔNG còn được đọc lúc xoá tài khoản (xem `ad2-phan-dinh-man-xoa-va-ten-mien.md`,
+ * `AD-2` + `AD-11` — mã uỷ quyền sống 5 phút nên cất từ lúc đăng nhập rồi dùng lúc xoá
+ * là sai loại, luôn gửi mã đã chết). Hằng số vẫn PHẢI export và PHẢI còn trong
+ * `LOCAL_USER_DATA_KEYS` (src/data/localUserData.ts dòng 30) — đó là việc DỌN khoá cũ
+ * còn sót trên máy đã cài bản trước Task 278 (Task 274/275), không phải việc đang dùng.
  */
 export const APPLE_AUTH_CODE_STORAGE_KEY = 'cbnews.appleAuthorizationCode.v1';
-
-/** Đọc lại mã uỷ quyền đã lưu — dùng lúc xoá tài khoản để gọi Worker thu hồi token. */
-export async function getAppleAuthorizationCode(): Promise<string | null> {
-  try {
-    return await SecureStore.getItemAsync(APPLE_AUTH_CODE_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
 
 export type AppleSignInResult =
   | { ok: true; displayName: string; providerUserId: string }
@@ -57,26 +42,28 @@ function formatFullName(
 }
 
 /**
- * Task 275 (BLI 258, đợt 3e — bản THĂM DÒ, không phải tính năng): đo trụ chịu lực của
- * AD-2 — xem attachment `ad-luong-token-apple.md` (work item 258, id
- * `0777288c-6d61-4c30-adde-88fbb0b20378`), mục 7 điều-chưa-biết #1: "Lần xác thực Apple
- * thứ hai (khi app đã được cấp quyền) có trả `authorizationCode` dùng được không —
- * đây là trụ chịu lực của cả AD-2". Sập câu hỏi này thì AD-2 phải rơi về phương án B
- * (AD-8) kèm sửa chính sách nặng hơn — nên phải đo TRƯỚC khi viết mã Worker thật.
+ * Task 278 (BLI 258, đợt 3g): cổng đo `AD-12` (`ad2-phan-dinh-man-xoa-va-ten-mien.md`)
+ * — thay cho `probeSecondAppleSignIn()` của Task 275 (đã gỡ). Task 275 chỉ đo "Apple
+ * có trả mã không" (kèm `length`, không lộ giá trị). `AD-12` chốt câu hỏi chịu lực còn
+ * lại là "mã đó có ĐỔI ĐƯỢC ở `/auth/token` không" — muốn đo được câu đó thì luồng xoá
+ * tài khoản phải GỬI THẬT giá trị mã lên Worker chặng 1, nên hàm này phải trả về mã
+ * thật, khác hẳn rào Task 275.
+ *
+ * Rào an toàn KHÔNG đổi, chỉ đổi CHỖ áp dụng: giá trị `code` chỉ được dùng đúng một
+ * việc — làm body gửi lên Worker trong cùng một luồng ngay sau khi gọi hàm này (F3:
+ * mã sống 5 phút, không cất, không chờ) — KHÔNG BAO GIỜ được hiện lên Alert/UI hay ghi
+ * log ở bất kỳ lớp gọi nào phía trên; chỉ `length` được phép hiện/log.
  *
  * Hàm THUẦN LOGIC, không đụng Alert/UI — test được bằng cách mock
- * `expo-apple-authentication`, giống `signInWithApple()` ở trên, không cần thiết bị
- * hay simulator thật. Kết quả trả về KHÔNG BAO GIỜ chứa giá trị mã dưới bất kỳ hình
- * thức nào khác ngoài `length` — rào an toàn Task 275: không hiện, không log, không
- * gửi giá trị mã đi đâu.
+ * `expo-apple-authentication`, không cần thiết bị hay simulator thật.
  */
-export type AppleSignInProbeResult =
-  | { kind: 'has-code'; length: number }
+export type AppleFreshCodeResult =
+  | { kind: 'has-code'; code: string; length: number }
   | { kind: 'no-code' }
   | { kind: 'cancelled' }
   | { kind: 'error'; errorName: string };
 
-export async function probeSecondAppleSignIn(): Promise<AppleSignInProbeResult> {
+export async function getFreshAppleRevocationCode(): Promise<AppleFreshCodeResult> {
   try {
     const credential = await AppleAuthentication.signInAsync({
       requestedScopes: [
@@ -85,7 +72,7 @@ export async function probeSecondAppleSignIn(): Promise<AppleSignInProbeResult> 
       ],
     });
     const code = credential.authorizationCode;
-    return code ? { kind: 'has-code', length: code.length } : { kind: 'no-code' };
+    return code ? { kind: 'has-code', code, length: code.length } : { kind: 'no-code' };
   } catch (err: unknown) {
     const errCode = (err as { code?: string } | null)?.code;
     if (errCode === 'ERR_REQUEST_CANCELED') {
@@ -112,20 +99,10 @@ export async function signInWithApple(): Promise<AppleSignInResult> {
     // ngay lần đó vào accountStore, các lần sau đọc từ bản ghi cục bộ, không hỏi lại Apple.
     const displayName =
       formatFullName(credential.fullName) ?? credential.email ?? 'Người dùng Apple';
-    // Giữ authorizationCode để lúc xoá tài khoản gọi được Worker thu hồi token (Task
-    // 274) — best-effort: lưu KHÔNG thành công (hiếm, lỗi Keychain) không được chặn cả
-    // luồng đăng nhập, người dùng vẫn đăng nhập được, chỉ mất khả năng thu hồi sau này.
-    // KHÔNG log giá trị `code` ra bất kỳ đâu (rào an toàn Task 274).
-    if (credential.authorizationCode) {
-      try {
-        await SecureStore.setItemAsync(
-          APPLE_AUTH_CODE_STORAGE_KEY,
-          credential.authorizationCode,
-        );
-      } catch {
-        // nuốt lỗi có chủ đích — xem ghi chú trên
-      }
-    }
+    // Task 278 (gỡ nợ AD-11): KHÔNG còn cất `authorizationCode` ở đây. Mã sống 5 phút
+    // (AD-2) nên cất lúc đăng nhập rồi dùng lúc xoá luôn là mã đã chết — đúng lỗi Task
+    // 274 để lại. Luồng xoá tài khoản (`deleteAccount.ts`) tự xin mã MỚI tại chỗ qua
+    // `getFreshAppleRevocationCode()`, không đọc từ đây.
     return { ok: true, displayName, providerUserId: credential.user };
   } catch (err: unknown) {
     const code = (err as { code?: string } | null)?.code;
