@@ -40,7 +40,12 @@ module.exports = {
     icon: './assets/icon.png',
     userInterfaceStyle: 'light',
     ios: {
-      supportsTablet: true,
+      // Task nộp App Store 30/08: để `true` (mặc định của khuôn mẫu Expo, không ai chọn)
+      // thì App Store Connect BẮT BUỘC phải có ảnh chụp cho màn iPad 13 inch mới cho nộp
+      // duyệt — nguyên văn: "You must upload a screenshot for 13-inch iPad displays".
+      // App chưa từng được thiết kế hay kiểm trên iPad, và không có thiết bị iPad để chụp.
+      // Khai iPhone-only là nói đúng thứ mình đã làm và đã kiểm.
+      supportsTablet: false,
       bundleIdentifier: 'com.cbcentres.cbnews',
       buildNumber: IOS_BUILD_NUMBER,
       // Task 268 (đợt 5a): app chỉ gọi HTTPS tiêu chuẩn (TLS có sẵn của hệ điều hành,
