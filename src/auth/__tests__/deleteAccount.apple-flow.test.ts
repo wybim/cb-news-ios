@@ -1,16 +1,21 @@
 /// <reference types="jest" />
 /**
- * Task 278 (BLI 258, đợt 3g) — DoD mục 4: "Tám kết cục ở bảng chữ [...] đều có nhánh
- * sinh ra được, không kết cục nào lọt xuống chữ chung chung." Kiểm luồng thật của
- * `deleteAccount()` nhánh Apple (`runAppleRevocationFlow()` trong `deleteAccount.ts`),
- * đúng thứ tự `AD-10` (`ad2-phan-dinh-man-xoa-va-ten-mien.md`): màn giải thích mới →
- * xin mã mới → gửi Worker chặng 1 (`AD-12`) → hiện kết quả thật.
+ * Task 281 (BLI 258, đợt 3i) — thay bảng "8 kết cục" chữ đo (`CONG AD-12: ...`, Task 278)
+ * bằng chữ THẬT cho người dùng, theo `AD-6` (`ad-luong-token-apple.md`): "App chỉ hiện
+ * chữ đã thu hồi khi `revoked === true`; ngược lại hiện hướng dẫn tự thu hồi trong Cài
+ * đặt." Vì bốn trong năm nhánh response thật của Worker (`src/cb-news-api-worker`, Task
+ * 279) đều dẫn tới CÙNG một chữ — "chưa thu hồi được" — bài kiểm này đối chiếu MỖI
+ * nhánh response với đúng MỘT trong hai câu người dùng thấy, không còn khuôn 8 dòng cũ.
+ *
+ * Kiểm luồng thật của `deleteAccount()` nhánh Apple (`runAppleRevocationFlow()` trong
+ * `deleteAccount.ts`), đúng thứ tự `AD-10` (`ad2-phan-dinh-man-xoa-va-ten-mien.md`): màn
+ * giải thích → xin mã mới → gửi Worker → hiện kết quả thật.
  *
  * `Alert.alert` được mock để TỰ BẤM nút theo kịch bản mỗi test (biến `mockNextChoice`,
  * đặt tên bắt đầu bằng "mock" theo đúng quy tắc babel-plugin-jest-hoist cho phép tham
  * chiếu biến ngoài phạm vi trong factory của `jest.mock`) — mô phỏng người dùng bấm
  * "Tiếp tục" hoặc "Bỏ qua bước này" ở màn giải thích, và ghi lại MỌI lời gọi Alert để
- * đối chiếu đúng một trong tám dòng chữ ở bảng brief Task 278.
+ * đối chiếu đúng chữ cuối cùng người dùng thấy.
  *
  * Chỉ mock module NATIVE/Expo — `deleteAccount.ts`, `appleAuth.ts`, `localUserData.ts`,
  * `accountStore.ts` chạy y hệt mã thật (đo đúng đối tượng, không đo bản sao — xem
@@ -85,6 +90,15 @@ import { deleteAccount } from '../deleteAccount';
 
 const FRESH_CODE = 'ma-uy-quyen-moi-lay-tai-cho-abc123';
 
+/** Hai chữ thật DUY NHẤT người dùng có thể thấy sau luồng Apple — khớp `deleteAccount.ts`. */
+const OUTCOME_TITLE = 'Đã xoá tài khoản';
+const MESSAGE_REVOKED =
+  'Dữ liệu trên máy đã xoá xong. Quyền đăng nhập bằng Apple của ứng dụng cũng đã được thu hồi.';
+const MESSAGE_NOT_REVOKED =
+  'Dữ liệu trên máy đã xoá xong. Chưa thu hồi được quyền đăng nhập bằng Apple — bạn có thể ' +
+  'tự thu hồi trong Cài đặt → tên Apple ID ở trên cùng → Đăng nhập & Bảo mật → Đăng nhập ' +
+  'bằng Apple → chọn CB News → Ngừng dùng Apple ID.';
+
 function mockWorkerJsonResponse(payload: unknown) {
   return { json: async () => payload } as Response;
 }
@@ -98,7 +112,7 @@ async function signInAndDeleteAsApple(): Promise<void> {
   await expect(deleteAccount()).resolves.toBeUndefined();
 }
 
-/** Bằng chứng chung mọi kịch bản đều phải giữ: xoá sạch + đăng xuất, bất kể AD-12 ra sao. */
+/** Bằng chứng chung mọi kịch bản đều phải giữ: xoá sạch + đăng xuất, bất kể Apple ra sao (AD-5). */
 async function expectLocalDataFullyCleared(): Promise<void> {
   const SecureStore = await import('expo-secure-store');
   for (const entry of LOCAL_USER_DATA_KEYS) {
@@ -109,11 +123,18 @@ async function expectLocalDataFullyCleared(): Promise<void> {
   expect(accountStore.getState()).toEqual({ status: 'signed-out' });
 }
 
-function lastAlertMessage(): string | undefined {
-  return mockAlertCalls[mockAlertCalls.length - 1]?.[1];
+function lastAlertCall(): [string, string | undefined, MockAlertButton[] | undefined] | undefined {
+  return mockAlertCalls[mockAlertCalls.length - 1];
 }
 
-describe('deleteAccount — Task 278: luồng Apple đo cổng AD-12, đúng bảng 8 kết cục', () => {
+/** Không bao giờ được lộ chữ đo cũ, mã lỗi kỹ thuật, hay stage/apple_status cho người dùng. */
+function expectNoTechnicalLeakage(message: string | undefined): void {
+  expect(message).toBeDefined();
+  expect(message).not.toMatch(/CONG AD-12/);
+  expect(message).not.toMatch(/stage|apple_status|invalid_grant|invalid_client|invalid_request/i);
+}
+
+describe('deleteAccount — Task 281: chữ thật cho người dùng, theo AD-6', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockAlertCalls.length = 0;
@@ -131,28 +152,52 @@ describe('deleteAccount — Task 278: luồng Apple đo cổng AD-12, đúng b�
     );
   });
 
-  it('BO QUA: bấm "Bỏ qua bước này" ở màn giải thích → không gọi Apple, không gọi Worker', async () => {
+  it('AD-10: màn giải thích hiện TRƯỚC hộp thoại Apple, nói rõ ý định và rằng bỏ qua vẫn xoá được', async () => {
+    (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
+      fullName: null,
+      email: null,
+      user: 'apple-user-id-thu-nghiem',
+      authorizationCode: FRESH_CODE,
+    });
+    (globalThis.fetch as jest.Mock).mockResolvedValue(
+      mockWorkerJsonResponse({ stage: 'apple_revoke', apple_status: 200, revoked: true, co_refresh_token: true }),
+    );
+
+    await signInAndDeleteAsApple();
+
+    const [title, message, buttons] = mockAlertCalls[0];
+    expect(title).toBe('Trước khi tiếp tục');
+    expect(message).toMatch(/hộp thoại xác nhận với Apple/);
+    expect(message).toMatch(/dữ liệu trên máy vẫn được xoá đầy đủ/);
+    expect(buttons?.map((b) => b.text)).toEqual(['Bỏ qua bước này', 'Tiếp tục']);
+  });
+
+  it('Bỏ qua bước giải thích → không gọi Apple, không gọi Worker, chưa thu hồi được', async () => {
     mockNextChoice = 'Bỏ qua bước này';
     await signInAndDeleteAsApple();
 
     expect(AppleAuthentication.signInAsync).not.toHaveBeenCalled();
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(lastAlertMessage()).toBe('CONG AD-12: BO QUA');
+    const [title, message] = lastAlertCall()!;
+    expect(title).toBe(OUTCOME_TITLE);
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
     await expectLocalDataFullyCleared();
   });
 
-  it('NGUOI DUNG HUY: huỷ hộp thoại Apple → không gọi Worker', async () => {
+  it('Huỷ hộp thoại Apple → không gọi Worker, chưa thu hồi được', async () => {
     (AppleAuthentication.signInAsync as jest.Mock).mockRejectedValue({
       code: 'ERR_REQUEST_CANCELED',
     });
     await signInAndDeleteAsApple();
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(lastAlertMessage()).toBe('CONG AD-12: NGUOI DUNG HUY');
+    const [title, message] = lastAlertCall()!;
+    expect(title).toBe(OUTCOME_TITLE);
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
     await expectLocalDataFullyCleared();
   });
 
-  it('KHONG CO MA (Apple trả code null) → không gọi Worker', async () => {
+  it('Apple trả code null → không gọi Worker, chưa thu hồi được', async () => {
     (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
       fullName: null,
       email: null,
@@ -162,22 +207,24 @@ describe('deleteAccount — Task 278: luồng Apple đo cổng AD-12, đúng b�
     await signInAndDeleteAsApple();
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(lastAlertMessage()).toBe('CONG AD-12: KHONG CO MA');
+    const [, message] = lastAlertCall()!;
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
     await expectLocalDataFullyCleared();
   });
 
-  it('KHONG CO MA (signInAsync ném lỗi không phải huỷ, vd ERR_REQUEST_UNKNOWN) → gộp cùng dòng "khong co ma"', async () => {
+  it('signInAsync ném lỗi không phải huỷ (vd ERR_REQUEST_UNKNOWN) → gộp cùng "chưa thu hồi được"', async () => {
     (AppleAuthentication.signInAsync as jest.Mock).mockRejectedValue({
       code: 'ERR_REQUEST_UNKNOWN',
     });
     await signInAndDeleteAsApple();
 
     expect(globalThis.fetch).not.toHaveBeenCalled();
-    expect(lastAlertMessage()).toBe('CONG AD-12: KHONG CO MA');
+    const [, message] = lastAlertCall()!;
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
     await expectLocalDataFullyCleared();
   });
 
-  it('DAT: Apple chấp nhận, co refresh token — và body gửi lên Worker đúng {"token": "..."}', async () => {
+  it('Nhánh 1 — biên Worker (400, stage:"worker") → chưa thu hồi được, không lộ mã lỗi kỹ thuật', async () => {
     (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
       fullName: null,
       email: null,
@@ -185,7 +232,7 @@ describe('deleteAccount — Task 278: luồng Apple đo cổng AD-12, đúng b�
       authorizationCode: FRESH_CODE,
     });
     (globalThis.fetch as jest.Mock).mockResolvedValue(
-      mockWorkerJsonResponse({ stage: 'apple_token', apple_status: 200, co_refresh_token: true }),
+      mockWorkerJsonResponse({ stage: 'worker', error: 'invalid_request', message: 'thieu truong token' }),
     );
 
     await signInAndDeleteAsApple();
@@ -193,33 +240,16 @@ describe('deleteAccount — Task 278: luồng Apple đo cổng AD-12, đúng b�
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://cb-news-api-worker.ngminhtri90.workers.dev/revoke',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ token: FRESH_CODE }),
-      }),
+      expect.objectContaining({ method: 'POST', body: JSON.stringify({ token: FRESH_CODE }) }),
     );
-    expect(lastAlertMessage()).toBe('CONG AD-12: DAT — apple_status 200, co refresh token');
+    const [title, message] = lastAlertCall()!;
+    expect(title).toBe(OUTCOME_TITLE);
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
+    expectNoTechnicalLeakage(message);
     await expectLocalDataFullyCleared();
   });
 
-  it('LA: Apple chấp nhận, KHONG co refresh token', async () => {
-    (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
-      fullName: null,
-      email: null,
-      user: 'apple-user-id-thu-nghiem',
-      authorizationCode: FRESH_CODE,
-    });
-    (globalThis.fetch as jest.Mock).mockResolvedValue(
-      mockWorkerJsonResponse({ stage: 'apple_token', apple_status: 200, co_refresh_token: false }),
-    );
-
-    await signInAndDeleteAsApple();
-
-    expect(lastAlertMessage()).toBe('CONG AD-12: LA — apple_status 200, KHONG co refresh token');
-    await expectLocalDataFullyCleared();
-  });
-
-  it('TRUOT: Apple từ chối ở /auth/token (invalid_grant) — error hiện NGUYÊN VĂN', async () => {
+  it('Nhánh 2 — Apple từ chối đổi mã (502, stage:"apple_token", invalid_grant) → chưa thu hồi được', async () => {
     (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
       fullName: null,
       email: null,
@@ -237,11 +267,13 @@ describe('deleteAccount — Task 278: luồng Apple đo cổng AD-12, đúng b�
 
     await signInAndDeleteAsApple();
 
-    expect(lastAlertMessage()).toBe('CONG AD-12: TRUOT — invalid_grant');
+    const [, message] = lastAlertCall()!;
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
+    expectNoTechnicalLeakage(message);
     await expectLocalDataFullyCleared();
   });
 
-  it('LOI WORKER: Worker chặn ở biên (thiếu/sai trường) — error hiện NGUYÊN VĂN', async () => {
+  it('Nhánh 3 — đổi mã xong nhưng KHÔNG có refresh token (200, co_refresh_token:false) → chưa thu hồi được', async () => {
     (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
       fullName: null,
       email: null,
@@ -249,16 +281,61 @@ describe('deleteAccount — Task 278: luồng Apple đo cổng AD-12, đúng b�
       authorizationCode: FRESH_CODE,
     });
     (globalThis.fetch as jest.Mock).mockResolvedValue(
-      mockWorkerJsonResponse({ stage: 'worker', error: 'invalid_request', message: 'thieu truong token' }),
+      mockWorkerJsonResponse({ stage: 'apple_token', apple_status: 200, co_refresh_token: false }),
     );
 
     await signInAndDeleteAsApple();
 
-    expect(lastAlertMessage()).toBe('CONG AD-12: LOI WORKER — invalid_request');
+    const [, message] = lastAlertCall()!;
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
     await expectLocalDataFullyCleared();
   });
 
-  it('KHONG GOI DUOC: fetch ném lỗi CẢ hai lần thử (tối đa một lần thử lại — AD-5)', async () => {
+  it('Nhánh 4 — thu hồi THÀNH CÔNG (revoked:true) → CHỈ nhánh này được nói "đã được thu hồi"', async () => {
+    (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
+      fullName: null,
+      email: null,
+      user: 'apple-user-id-thu-nghiem',
+      authorizationCode: FRESH_CODE,
+    });
+    (globalThis.fetch as jest.Mock).mockResolvedValue(
+      mockWorkerJsonResponse({ stage: 'apple_revoke', apple_status: 200, revoked: true, co_refresh_token: true }),
+    );
+
+    await signInAndDeleteAsApple();
+
+    const [title, message] = lastAlertCall()!;
+    expect(title).toBe(OUTCOME_TITLE);
+    expect(message).toBe(MESSAGE_REVOKED);
+    await expectLocalDataFullyCleared();
+  });
+
+  it('Nhánh 5 — thu hồi THẤT BẠI (revoked:false, apple_status thật) → chưa thu hồi được', async () => {
+    (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
+      fullName: null,
+      email: null,
+      user: 'apple-user-id-thu-nghiem',
+      authorizationCode: FRESH_CODE,
+    });
+    (globalThis.fetch as jest.Mock).mockResolvedValue(
+      mockWorkerJsonResponse({
+        stage: 'apple_revoke',
+        apple_status: 500,
+        revoked: false,
+        error: 'server_error',
+        message: 'Apple tra ve loi khong xac dinh',
+      }),
+    );
+
+    await signInAndDeleteAsApple();
+
+    const [, message] = lastAlertCall()!;
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
+    expectNoTechnicalLeakage(message);
+    await expectLocalDataFullyCleared();
+  });
+
+  it('Không gọi được Worker: fetch ném lỗi CẢ hai lần thử (tối đa một lần thử lại — AD-5) → chưa thu hồi được', async () => {
     (AppleAuthentication.signInAsync as jest.Mock).mockResolvedValue({
       fullName: null,
       email: null,
@@ -270,7 +347,8 @@ describe('deleteAccount — Task 278: luồng Apple đo cổng AD-12, đúng b�
     await signInAndDeleteAsApple();
 
     expect(globalThis.fetch).toHaveBeenCalledTimes(2); // thử + đúng một lần thử lại
-    expect(lastAlertMessage()).toBe('CONG AD-12: KHONG GOI DUOC — TypeError');
+    const [, message] = lastAlertCall()!;
+    expect(message).toBe(MESSAGE_NOT_REVOKED);
     await expectLocalDataFullyCleared();
   });
 });
