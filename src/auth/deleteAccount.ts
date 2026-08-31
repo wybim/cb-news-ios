@@ -179,8 +179,11 @@ export async function deleteAccount(): Promise<void> {
   if (current.status === 'signed-in' && current.provider === 'apple') {
     await runAppleRevocationFlow();
   }
-  // Xoá TẤT CẢ khoá đã đăng ký ở LOCAL_USER_DATA_KEYS (mọi backend) — nguồn duy nhất,
-  // không tự lặp SecureStore ở đây để tránh quên khoá mới (đúng bẫy brief Task 267 cảnh báo).
-  await clearAllLocalUserData();
+  // Xoá TẤT CẢ khoá đã đăng ký ở LOCAL_USER_DATA_KEYS (mọi backend) CỘNG khoá bài lưu
+  // offline CỦA CHÍNH TÀI KHOẢN NÀY (Task 284, F3) — nguồn duy nhất, không tự lặp
+  // SecureStore/AsyncStorage ở đây để tránh quên khoá mới (đúng bẫy brief Task 267 cảnh
+  // báo). Đọc `current` TRƯỚC dòng này (không đọc lại sau `signOut()` ở dưới) vì
+  // `accountStore.signOut()` xoá bản ghi tài khoản — mất định danh cần để tính đúng khoá.
+  await clearAllLocalUserData(current.status === 'signed-in' ? current : null);
   await accountStore.signOut();
 }

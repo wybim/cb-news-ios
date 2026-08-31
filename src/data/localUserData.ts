@@ -1,16 +1,22 @@
 import * as SecureStore from 'expo-secure-store';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { ACCOUNT_STORAGE_KEY } from '../state/accountStore';
-import { SAVED_ARTICLES_STORAGE_KEY } from './savedArticles';
+import { ACCOUNT_STORAGE_KEY, type AccountProvider } from '../state/accountStore';
+import { buildSavedArticlesStorageKey } from './savedArticles';
 import { APPLE_AUTH_CODE_STORAGE_KEY } from '../auth/appleAuth';
 
 /**
  * MỌI khoá lưu trữ trên máy chứa dữ liệu người dùng của CB News.
  *
- * "Xoá tài khoản" (Apple Guideline 5.1.1(v)) phải xoá sạch từng khoá trong danh sách
- * này. Tính năng nào sau này lưu thêm dữ liệu người dùng trên máy (bài đọc offline ở
- * đợt 4 là ví dụ đầu tiên) PHẢI đăng ký khoá của mình vào đây thay vì tự viết đường
- * xoá riêng — một danh sách duy nhất, không rải rác nhiều nơi.
+ * "Xoá tài khoản" (Apple Guideline 5.1.1(v)) phải xoá sạch từng khoá liên quan tới tài
+ * khoản đang bị xoá. Tính năng nào sau này lưu thêm dữ liệu người dùng trên máy PHẢI đăng
+ * ký khoá của mình vào đây thay vì tự viết đường xoá riêng — một nguồn xoá duy nhất
+ * (`clearAllLocalUserData()`), không rải rác nhiều nơi.
+ *
+ * `LOCAL_USER_DATA_KEYS` dưới đây chỉ liệt kê khoá KHÔNG đổi theo tài khoản (đúng một bản
+ * ghi tài khoản đang đăng nhập, đúng một mã uỷ quyền Apple cũ cần dọn). Bài lưu đọc offline
+ * (Task 267, tách theo tài khoản ở Task 284) không nằm trong danh sách tĩnh này nữa — mỗi
+ * tài khoản có một khoá riêng (`buildSavedArticlesStorageKey`, xem `savedArticles.ts`), nên
+ * `clearAllLocalUserData()` nhận thêm tài khoản đang bị xoá để tính đúng khoá cần dọn.
  *
  * Mở rộng Task 267 so với bản gốc (chỉ 1 khoá SecureStore của tài khoản): dữ liệu bài
  * lưu offline nằm ở AsyncStorage, không phải SecureStore (lý do: xem comment trong
@@ -23,19 +29,24 @@ export type LocalUserDataEntry = { key: string; backend: LocalUserDataBackend };
 
 export const LOCAL_USER_DATA_KEYS: readonly LocalUserDataEntry[] = [
   { key: ACCOUNT_STORAGE_KEY, backend: 'secure-store' },
-  { key: SAVED_ARTICLES_STORAGE_KEY, backend: 'async-storage' },
-  // Task 274: mã uỷ quyền Apple (authorizationCode) giữ lại để gọi Worker thu hồi
-  // token lúc xoá tài khoản — thiếu dòng này thì xoá tài khoản để sót mã lại trong
-  // Keychain, vi phạm đúng cam kết "xoá sạch dữ liệu" app hiển thị cho người dùng.
+  // Task 274/278: mã uỷ quyền Apple (authorizationCode) KHÔNG còn được ghi lúc đăng nhập
+  // hay đọc lúc xoá tài khoản từ Task 278 (xem `appleAuth.ts`) — hằng số này giờ chỉ còn
+  // tác dụng DỌN khoá cũ còn sót trên máy đã cài bản trước Task 278. Sửa lại chú thích cho
+  // đúng hiện trạng (F5, Task 284 — bản trước ghi nhầm "giữ lại để gọi Worker thu hồi
+  // token", QC Task 282 đã bắt được).
   { key: APPLE_AUTH_CODE_STORAGE_KEY, backend: 'secure-store' },
 ];
 
 /**
- * Xoá sạch mọi khoá đã đăng ký, đúng backend của từng khoá. Nguồn xoá tài khoản DUY NHẤT —
- * `deleteAccount.ts` gọi hàm này thay vì tự lặp `SecureStore.deleteItemAsync`.
+ * Xoá sạch mọi khoá đã đăng ký trong `LOCAL_USER_DATA_KEYS`, đúng backend của từng khoá,
+ * CỘNG khoá bài lưu offline của `account` (nếu có tài khoản đang bị xoá — `null` khi không
+ * xác định được, ví dụ đã đăng xuất trước đó). Nguồn xoá tài khoản DUY NHẤT — `deleteAccount.ts`
+ * gọi hàm này thay vì tự lặp `SecureStore.deleteItemAsync`/`AsyncStorage.removeItem`.
  * Một khoá lỗi không chặn các khoá còn lại (best-effort, giống hành vi cũ).
  */
-export async function clearAllLocalUserData(): Promise<void> {
+export async function clearAllLocalUserData(
+  account: { provider: AccountProvider; providerUserId: string } | null,
+): Promise<void> {
   for (const entry of LOCAL_USER_DATA_KEYS) {
     try {
       if (entry.backend === 'secure-store') {
@@ -45,6 +56,13 @@ export async function clearAllLocalUserData(): Promise<void> {
       }
     } catch {
       // tiếp tục xoá các khoá còn lại dù một khoá lỗi
+    }
+  }
+  if (account) {
+    try {
+      await AsyncStorage.removeItem(buildSavedArticlesStorageKey(account.provider, account.providerUserId));
+    } catch {
+      // best-effort, giống các khoá khác ở trên
     }
   }
 }
