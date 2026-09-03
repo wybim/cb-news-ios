@@ -3,6 +3,10 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ACCOUNT_STORAGE_KEY, type AccountProvider } from '../state/accountStore';
 import { buildSavedArticlesStorageKey } from './savedArticles';
 import { APPLE_AUTH_CODE_STORAGE_KEY } from '../auth/appleAuth';
+import { READING_PROGRESS_STORAGE_KEY } from './readingProgress';
+import { LAST_KNOWN_ARTICLE_MARKER_STORAGE_KEY, LAST_SYNCED_AT_STORAGE_KEY } from './newsSyncState';
+import { ARTICLE_CACHE_STORAGE_KEY } from './articleCache';
+import { WIDGET_SNAPSHOT_STORAGE_KEY } from './widgetSnapshot';
 
 /**
  * MỌI khoá lưu trữ trên máy chứa dữ liệu người dùng của CB News.
@@ -32,6 +36,12 @@ import { APPLE_AUTH_CODE_STORAGE_KEY } from '../auth/appleAuth';
  * `sweepOnAccountDeletion`. Task 301 chỉ dựng cơ chế phân loại — KHÔNG đăng ký khoá thiết bị
  * nào ở đây (đó là dữ liệu của các task sau); hai khoá tĩnh hiện có giữ `true`, đúng hành vi
  * cũ (chúng luôn bị quét).
+ *
+ * Task 305 (BLI 299 — động cơ vòng 2, `AD-16`/`AD-17`/`AD-18`/`AD-23`/`AD-25`): đăng ký
+ * NĂM khoá thiết bị mới do handler bốn việc (`../background/newsRefreshCycle.ts`) sinh ra,
+ * đúng phân loại `F4` của brief Task 305 — hai khoá NÓI VỀ CON NGƯỜI (`true`): bản ghi
+ * trạng thái đọc, mốc đã-đọc; ba khoá là bản sao/số đo không tiết lộ gì về người dùng
+ * (`false`): mốc đồng-bộ lần cuối, cache nội dung bài công cộng, payload ảnh chụp widget.
  */
 export type LocalUserDataBackend = 'secure-store' | 'async-storage';
 export type LocalUserDataEntry = {
@@ -52,6 +62,15 @@ export const LOCAL_USER_DATA_KEYS: readonly LocalUserDataEntry[] = [
   // đúng hiện trạng (F5, Task 284 — bản trước ghi nhầm "giữ lại để gọi Worker thu hồi
   // token", QC Task 282 đã bắt được).
   { key: APPLE_AUTH_CODE_STORAGE_KEY, backend: 'secure-store', sweepOnAccountDeletion: true },
+  // Task 305 — hai khoá NÓI VỀ CON NGƯỜI, phải mất khi xoá tài khoản (AD-23).
+  { key: READING_PROGRESS_STORAGE_KEY, backend: 'async-storage', sweepOnAccountDeletion: true },
+  { key: LAST_KNOWN_ARTICLE_MARKER_STORAGE_KEY, backend: 'async-storage', sweepOnAccountDeletion: true },
+  // Task 305 — ba khoá là bản sao/số đo không tiết lộ gì về người dùng, GIỮ khi xoá tài
+  // khoản (AD-23): quét chúng chỉ làm widget/đồng bộ trống trơn mà không đổi được câu nào
+  // trên trang chính sách.
+  { key: LAST_SYNCED_AT_STORAGE_KEY, backend: 'async-storage', sweepOnAccountDeletion: false },
+  { key: ARTICLE_CACHE_STORAGE_KEY, backend: 'async-storage', sweepOnAccountDeletion: false },
+  { key: WIDGET_SNAPSHOT_STORAGE_KEY, backend: 'async-storage', sweepOnAccountDeletion: false },
 ];
 
 /**

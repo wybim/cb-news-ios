@@ -86,6 +86,12 @@ module.exports = {
         '@react-native-google-signin/google-signin',
         { iosUrlScheme: deriveGoogleIosUrlScheme(GOOGLE_IOS_CLIENT_ID) },
       ],
+      // Task 305 (BLI 299, AD-18): `npx expo install expo-background-task` tự yêu cầu
+      // khai plugin này (lệnh in ra "Cannot automatically write to dynamic config",
+      // kèm đúng khối JSON dưới đây) — nó tự áp `UIBackgroundModes: ["processing"]` +
+      // `BGTaskSchedulerPermittedIdentifiers` vào Info.plist lúc prebuild. Không cấu
+      // hình gì thêm (không tuỳ chọn nào để truyền).
+      'expo-background-task',
     ],
   },
 };

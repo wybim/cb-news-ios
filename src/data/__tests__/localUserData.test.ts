@@ -65,6 +65,12 @@ import {
   type LocalUserDataEntry,
 } from '../localUserData';
 import { buildSavedArticlesStorageKey } from '../savedArticles';
+import { ACCOUNT_STORAGE_KEY } from '../../state/accountStore';
+import { APPLE_AUTH_CODE_STORAGE_KEY } from '../../auth/appleAuth';
+import { READING_PROGRESS_STORAGE_KEY } from '../readingProgress';
+import { LAST_KNOWN_ARTICLE_MARKER_STORAGE_KEY, LAST_SYNCED_AT_STORAGE_KEY } from '../newsSyncState';
+import { ARTICLE_CACHE_STORAGE_KEY } from '../articleCache';
+import { WIDGET_SNAPSHOT_STORAGE_KEY } from '../widgetSnapshot';
 
 beforeEach(() => {
   mockAsyncStorageMap.clear();
@@ -109,25 +115,65 @@ describe('sweepLocalUserDataEntries — cơ chế phân loại PHÂN ĐỊNH Đ�
 });
 
 describe('LOCAL_USER_DATA_KEYS — hành vi hiện có KHÔNG đổi sau Task 301 (DoD mục 4)', () => {
-  it('hai khoá tĩnh đang có vẫn khai sweepOnAccountDeletion=true (vẫn bị quét như cũ)', () => {
-    for (const entry of LOCAL_USER_DATA_KEYS) {
+  // Task 305 thêm ba khoá `sweepOnAccountDeletion: false` vào mảng này — hai bài kiểm
+  // dưới đây CHỈ còn đúng cho hai khoá tĩnh GỐC (secure-store), không phải cho TOÀN BỘ
+  // mảng nữa. Bài kiểm cho khoá mới của Task 305 nằm ở describe block riêng bên dưới.
+  const legacySecureStoreKeys = [ACCOUNT_STORAGE_KEY, APPLE_AUTH_CODE_STORAGE_KEY];
+
+  it('hai khoá tĩnh gốc (secure-store) vẫn khai sweepOnAccountDeletion=true (vẫn bị quét như cũ)', () => {
+    const legacyEntries = LOCAL_USER_DATA_KEYS.filter((e) => legacySecureStoreKeys.includes(e.key));
+    expect(legacyEntries).toHaveLength(2);
+    for (const entry of legacyEntries) {
       expect(entry.sweepOnAccountDeletion).toBe(true);
     }
   });
 
-  it('clearAllLocalUserData(): ba khoá đang có (2 khoá tĩnh + khoá bài lưu của tài khoản) đều bị quét', async () => {
+  it('clearAllLocalUserData(): hai khoá tĩnh gốc + khoá bài lưu của tài khoản đều bị quét', async () => {
     const account = { provider: 'apple' as const, providerUserId: 'sweep-check-user' };
-    for (const entry of LOCAL_USER_DATA_KEYS) {
-      await SecureStore.setItemAsync(entry.key, 'x');
+    for (const key of legacySecureStoreKeys) {
+      await SecureStore.setItemAsync(key, 'x');
     }
     const savedArticlesKey = buildSavedArticlesStorageKey(account.provider, account.providerUserId);
     await AsyncStorage.setItem(savedArticlesKey, JSON.stringify({}));
 
     await clearAllLocalUserData(account);
 
-    for (const entry of LOCAL_USER_DATA_KEYS) {
-      expect(await SecureStore.getItemAsync(entry.key)).toBeNull();
+    for (const key of legacySecureStoreKeys) {
+      expect(await SecureStore.getItemAsync(key)).toBeNull();
     }
     expect(await AsyncStorage.getItem(savedArticlesKey)).toBeNull();
+  });
+});
+
+describe('LOCAL_USER_DATA_KEYS — năm khoá mới của Task 305 (AD-23) PHÂN ĐỊNH ĐƯỢC', () => {
+  // Đúng yêu cầu brief Task 305: trong CÙNG một lượt gọi clearAllLocalUserData(), khoá
+  // khai true (nói về con người) phải MẤT, khoá khai false (bản sao công cộng/số đo)
+  // phải CÒN — hai quan sát ngược chiều nhau, dùng thẳng mảng LOCAL_USER_DATA_KEYS thật
+  // (không phải danh sách tổng hợp riêng cho bài kiểm), nên đây là bằng chứng mạnh hơn
+  // bài kiểm cơ chế thuần tuý ở describe đầu file.
+  const sweptKeys = [READING_PROGRESS_STORAGE_KEY, LAST_KNOWN_ARTICLE_MARKER_STORAGE_KEY];
+  const keptKeys = [LAST_SYNCED_AT_STORAGE_KEY, ARTICLE_CACHE_STORAGE_KEY, WIDGET_SNAPSHOT_STORAGE_KEY];
+
+  it('mọi khoá mới đều đã đăng ký vào LOCAL_USER_DATA_KEYS với backend async-storage', () => {
+    for (const key of [...sweptKeys, ...keptKeys]) {
+      const entry = LOCAL_USER_DATA_KEYS.find((e) => e.key === key);
+      expect(entry).toBeDefined();
+      expect(entry?.backend).toBe('async-storage');
+    }
+  });
+
+  it('clearAllLocalUserData(): hai khoá "nói về con người" mất, ba khoá "công cộng/số đo" còn — trong CÙNG một lượt gọi', async () => {
+    for (const key of [...sweptKeys, ...keptKeys]) {
+      await AsyncStorage.setItem(key, 'gia-tri-thu');
+    }
+
+    await clearAllLocalUserData(null);
+
+    for (const key of sweptKeys) {
+      expect(await AsyncStorage.getItem(key)).toBeNull();
+    }
+    for (const key of keptKeys) {
+      expect(await AsyncStorage.getItem(key)).toBe('gia-tri-thu');
+    }
   });
 });

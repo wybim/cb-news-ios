@@ -1,16 +1,31 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, AppState, StyleSheet, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { accountStore, useAccountState } from './src/state/accountStore';
 import { resolveRootView } from './src/state/accessPolicy';
 import { savedArticlesStore } from './src/data/savedArticles';
 import { HomeScreen } from './src/screens/HomeScreen';
+import { runNewsRefreshCycle } from './src/background/newsRefreshCycle';
+import { registerNewsBackgroundTaskAsync } from './src/background/backgroundTask';
+import { createForegroundRefreshHandler } from './src/background/appLifecycle';
 
 export default function App() {
   const account = useAccountState();
 
   useEffect(() => {
     void accountStore.hydrate();
+  }, []);
+
+  // Task 305 (BLI 299, AD-18/AD-25): đăng ký ĐÚNG MỘT lượt chạy nền, và chạy ngay MỘT lượt
+  // TIỀN CẢNH khi mở app + mỗi khi app quay lại tiền cảnh (AppState → 'active'). Đây là
+  // đường bắt buộc để bộ lên lịch thông báo không phụ thuộc riêng vào việc iOS có cấp lượt
+  // nền hay không (AD-25) — không đụng màn hình nào, chỉ nối dây ở gốc app.
+  useEffect(() => {
+    void registerNewsBackgroundTaskAsync();
+    void runNewsRefreshCycle();
+    const handler = createForegroundRefreshHandler(runNewsRefreshCycle);
+    const subscription = AppState.addEventListener('change', handler);
+    return () => subscription.remove();
   }, []);
 
   useEffect(() => {
