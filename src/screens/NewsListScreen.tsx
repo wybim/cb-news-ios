@@ -107,12 +107,22 @@ export function NewsListScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const savedMap = useSavedArticles();
+  // Task 318 (BLI 299) — số bài ĐANG HIỆN, cập nhật ĐỒNG BỘ ngay tại chỗ gọi `setPosts` bên
+  // dưới, KHÔNG đọc biến `posts` (closure của `useCallback` deps `[]`, luôn là giá trị lúc
+  // mount — đọc nó ở đây sẽ luôn ra 0, bẫy brief Task 318). `setPosts` trong `loadPage` là
+  // nơi DUY NHẤT trong file này đổi `posts`, nên ref này luôn khớp state ngay sau mỗi lần
+  // settle — dùng để truyền số bài vào `markHomeContentReady`, không phụ thuộc thời điểm
+  // React thật sự chạy updater hàm của `setPosts`.
+  const postsCountRef = useRef(0);
 
   const loadPage = useCallback(async (nextPage: number, replace: boolean) => {
     setLoading(true);
     setError(null);
     try {
       const result = await fetchNewsPage(nextPage, pageSizeRef.current);
+      postsCountRef.current = replace
+        ? result.posts.length
+        : postsCountRef.current + result.posts.length;
       setPosts((prev) => (replace ? result.posts : [...prev, ...result.posts]));
       setPage(result.page);
       // Đọc totalPages TỪ CHÍNH lần gọi này mỗi lần — không hard-code (bẫy brief Task 267).
@@ -125,7 +135,10 @@ export function NewsListScreen({
       // không chỉ lần đầu. Ảnh run 2 lộ ra một lượt phân trang có thể còn bay lúc chụp dù
       // lần tải đầu đã xong; workflow giờ dò tới khi tệp NGỪNG đổi (đứng yên), không chỉ tới
       // khi tệp xuất hiện lần đầu — xem `capture-ipad-screenshot.yml`.
-      markHomeContentReady();
+      // Task 318: kèm SỐ BÀI đang hiện (postsCountRef, không phải mốc thời gian suông) —
+      // lỗi bị fetch (nhánh catch) không đổi postsCountRef, đúng: posts trên màn không đổi
+      // nên số báo cho CI cũng không được đổi.
+      markHomeContentReady(postsCountRef.current);
     }
   }, []);
 
