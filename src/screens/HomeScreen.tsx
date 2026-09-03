@@ -33,7 +33,10 @@ export function HomeScreen({ account }: { account: AccountState }) {
       )}
 
       {route.name === 'news' && (
-        <NewsListScreen onOpenArticle={(postId) => setRoute({ name: 'article', postId })} />
+        <NewsListScreen
+          account={account}
+          onOpenArticle={(postId) => setRoute({ name: 'article', postId })}
+        />
       )}
 
       {route.name === 'article' && (

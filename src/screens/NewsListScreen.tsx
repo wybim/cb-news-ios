@@ -6,6 +6,7 @@ import {
   RefreshControl,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { fetchNewsPage, NewsApiError, type PostSummary } from '../api/newsApi';
@@ -15,6 +16,9 @@ import { formatVietnameseDate } from '../utils/formatDate';
 import { useSavedArticles, type SavedArticle } from '../data/savedArticles';
 import { loadHomeSectionsData } from '../data/homeData';
 import { buildHomeSections, formatSyncTime, type HomeSectionsInput } from '../state/homeSections';
+import { buildSavedSearchViewState } from '../state/savedArticlesSearch';
+import { isSignedIn } from '../state/accessPolicy';
+import type { AccountState } from '../state/accountStore';
 import { triggerManualRefresh } from '../background/manualRefresh';
 
 const PER_PAGE = 10;
@@ -39,8 +43,21 @@ const EMPTY_HOME_DATA: HomeSectionsInput = {
  * `homeData.ts`/`homeSections.ts` (phân vùng THIẾT BỊ, không cần đăng nhập — `F3`/`AD-22`).
  * Quyết định thứ tự/hiện gì nằm ở `homeSections.ts` (hàm thuần, có phép thử) — ở đây chỉ vẽ
  * (F6, đúng tiền lệ `accessPolicy.ts` Task 298).
+ *
+ * Task 309 (BLI 299, `AD-19`/`AD-22`): thêm khối ④ — TÌM TRONG BÀI ĐÃ LƯU, ngay dưới khối ②.
+ * Đây là hạng mục DUY NHẤT của vòng 2 được phép đòi đăng nhập (`AD-22`) — dùng `isSignedIn()`
+ * (`accessPolicy.ts`), KHÔNG tự kiểm trạng thái đăng nhập (rào an toàn #5). Chưa đăng nhập →
+ * khối ④ hiện lời mời kèm lý do; BA khối ①②③ ở trên KHÔNG đổi, vẫn dùng được bình thường —
+ * đây là rào quan trọng nhất của task (F1, dẫm lại 5.1.1(v) nếu làm sai hướng này). Quyết
+ * định khối ④ hiện gì nằm ở `savedArticlesSearch.ts` (hàm thuần, có phép thử) — ở đây chỉ vẽ.
  */
-export function NewsListScreen({ onOpenArticle }: { onOpenArticle: (postId: number) => void }) {
+export function NewsListScreen({
+  account,
+  onOpenArticle,
+}: {
+  account: AccountState;
+  onOpenArticle: (postId: number) => void;
+}) {
   const [tab, setTab] = useState<Tab>('latest');
   const [posts, setPosts] = useState<PostSummary[]>([]);
   const [page, setPage] = useState(0);
@@ -121,6 +138,21 @@ export function NewsListScreen({ onOpenArticle }: { onOpenArticle: (postId: numb
     [savedMap],
   );
 
+  // Task 309 — khối ④ (ô tìm kiếm trong bài đã lưu). `isSignedIn(account)` là NƠI DUY NHẤT
+  // hỏi trạng thái đăng nhập (rào an toàn #5); `buildSavedSearchViewState` là hàm THUẦN quyết
+  // định hiện gì (mời đăng nhập / rỗng / chưa lưu bài nào / không khớp / kết quả) — xem
+  // `savedArticlesSearch.ts`.
+  const [savedSearchQuery, setSavedSearchQuery] = useState('');
+  const savedSearchView = useMemo(
+    () =>
+      buildSavedSearchViewState({
+        isSignedIn: isSignedIn(account),
+        savedArticles: savedList,
+        query: savedSearchQuery,
+      }),
+    [account, savedList, savedSearchQuery],
+  );
+
   const showInitialLoading = tab === 'latest' && loading && posts.length === 0 && !error;
   const showInitialError = tab === 'latest' && error !== null && posts.length === 0;
   const showEmptySaved = tab === 'saved' && savedList.length === 0;
@@ -171,6 +203,47 @@ export function NewsListScreen({ onOpenArticle }: { onOpenArticle: (postId: numb
             </Text>
           </View>
         )}
+
+        <View style={styles.searchBlock}>
+          <Text style={styles.sectionLabel}>Tìm trong bài đã lưu</Text>
+          {savedSearchView.kind === 'signInRequired' ? (
+            <Text style={styles.searchHint}>
+              Đăng nhập ở mục Tài khoản để tìm trong bài bạn đã lưu — bài lưu thuộc về tài
+              khoản của bạn.
+            </Text>
+          ) : (
+            <>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Tìm theo tiêu đề hoặc nội dung…"
+                value={savedSearchQuery}
+                onChangeText={setSavedSearchQuery}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+              />
+              {savedSearchView.kind === 'noSavedArticles' && (
+                <Text style={styles.searchHint}>Bạn chưa lưu bài nào để tìm.</Text>
+              )}
+              {savedSearchView.kind === 'noMatch' && (
+                <Text style={styles.searchHint}>
+                  Không tìm thấy bài đã lưu nào khớp “{savedSearchQuery.trim()}”.
+                </Text>
+              )}
+              {savedSearchView.kind === 'results' && (
+                <View>
+                  {savedSearchView.articles.map((article) => (
+                    <ArticleRow
+                      key={article.id}
+                      post={article}
+                      onPress={() => onOpenArticle(article.id)}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
+          )}
+        </View>
       </View>
 
       <View style={styles.tabs}>
@@ -277,6 +350,17 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   offlineText: { fontSize: 13, color: '#495057' },
+  searchBlock: { gap: 6 },
+  searchHint: { fontSize: 13, color: '#495057' },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontSize: 14,
+    color: '#212529',
+  },
   tabs: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, gap: 8 },
   tabButton: {
     paddingVertical: 8,
