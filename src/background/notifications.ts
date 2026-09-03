@@ -24,16 +24,12 @@ Notifications.setNotificationHandler({
 });
 
 /**
- * Xin quyền thông báo — CHỈ được gọi LAZY, ngay trước khi thật sự cần gửi một thông báo
- * (từ `scheduleNewArticleNotification`), KHÔNG gọi lúc app khởi động.
- *
- * Đây là cách rẻ nhất task này làm được để bám tinh thần `F5` ("xin quyền ở thời điểm có
- * nghĩa, không ở màn đầu") MÀ KHÔNG phải sửa màn hình nào: lượt làm mới ĐẦU TIÊN của một
- * máy luôn là "bootstrap" (`newsRefreshCycle.ts` — mốc đã-đọc còn trống, không thông báo
- * gì), nên hộp thoại xin quyền chỉ hiện ra ở lượt CÓ BÀI MỚI THẬT, tức trễ hơn lượt mở app
- * đầu tiên. GAP CÒN LẠI (đã khai trong comment giao hàng): `F5` muốn đúng thời điểm "sau
- * khi người dùng đã đọc ít nhất một bài" — điều đó cần một điểm chạm ở `ArticleScreen`,
- * ngoài phạm vi task này (rào "không sửa màn hình nào").
+ * XIN quyền thông báo (kiểm rồi xin nếu chưa có, bật hộp thoại hệ thống khi cần). Đường
+ * gọi hợp lệ DUY NHẤT còn lại là `src/state/notificationTiming.ts`
+ * (`maybeRequestNotificationPermissionAfterReading` — chỉ xin SAU khi người dùng đã đọc ít
+ * nhất một bài). `scheduleNewArticleNotification` bên dưới KHÔNG còn gọi hàm này (Task 308,
+ * đóng lỗ `AD-25`: đường lên lịch chỉ được KIỂM, không được XIN — xem
+ * `hasNotificationPermissionAsync`).
  */
 export async function ensureNotificationPermissionsAsync(): Promise<boolean> {
   const current = await Notifications.getPermissionsAsync();
@@ -44,17 +40,31 @@ export async function ensureNotificationPermissionsAsync(): Promise<boolean> {
 }
 
 /**
+ * KIỂM quyền thông báo hiện có — CHỈ `getPermissionsAsync`, KHÔNG BAO GIỜ gọi
+ * `requestPermissionsAsync`, không bật hộp thoại hệ thống. Dùng cho đường LÊN LỊCH
+ * (`scheduleNewArticleNotification`), vì đường đó có thể chạy ở lượt nền lẫn lượt tiền cảnh
+ * đầu tiên khi mở app (`AD-25`) — xin quyền ở đó là đúng phương án đã bị `AD-25` loại
+ * (Task 308).
+ */
+export async function hasNotificationPermissionAsync(): Promise<boolean> {
+  const current = await Notifications.getPermissionsAsync();
+  return current.granted;
+}
+
+/**
  * Lên lịch MỘT thông báo cục bộ cho "có bài mới" — `trigger: null` (hiện ngay khi hệ
  * thống xử lý lượt gọi này, dù đang ở lượt nền hay lượt tiền cảnh — `AD-25`). Trả `false`
  * nếu chưa có quyền hoặc `scheduleNotificationAsync` lỗi — KHÔNG throw, vì đây là một
  * nhánh trong việc ② của handler bốn việc và không được chặn việc ③/④ phía sau (`AD-18`).
+ * CHỈ kiểm quyền (`hasNotificationPermissionAsync`), KHÔNG xin — chưa có quyền thì bỏ qua
+ * việc lên lịch trong im lặng, không bật hộp thoại nào (Task 308).
  */
 export async function scheduleNewArticleNotification(
   newArticleCount: number,
   latestArticle: Pick<PostSummary, 'titleHtml'>,
 ): Promise<boolean> {
   try {
-    const granted = await ensureNotificationPermissionsAsync();
+    const granted = await hasNotificationPermissionAsync();
     if (!granted) return false;
     await Notifications.scheduleNotificationAsync({
       content: {
