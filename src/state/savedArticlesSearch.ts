@@ -1,5 +1,6 @@
 import { inlineTextOnly } from '../utils/htmlParser';
 import type { SavedArticle } from '../data/savedArticles';
+import type { PostDetail } from '../api/newsApi';
 
 /**
  * Tìm trong bài đã lưu (Task 309, BLI 299 — `AD-19`/`AD-22`) — QUYẾT ĐỊNH THUẦN, tách khỏi
@@ -18,6 +19,19 @@ import type { SavedArticle } from '../data/savedArticles';
  * Đúng một người dùng thật, số bài lưu nhỏ, quét tuyến tính là đủ (bài học
  * kb/lessons/2026-08-30-chon-xong-de-yen-trong-ho-so.md: dựng chỉ mục là tạo nguồn sự thật
  * thứ hai phải giữ đồng bộ).
+ *
+ * Task 315 (BLI 299, `AD-21`) — trả lại đúng AD-21: khối ④ phải chạy được khi CHƯA đăng nhập,
+ * tìm trên CACHE (phân vùng thiết bị, `PostDetail` — `articleCache.ts`), không chỉ trên bài ĐÃ
+ * LƯU (phân vùng tài khoản, `SavedArticle`). Hai kiểu khác nhau (`SavedArticle` = `PostDetail`
+ * + `savedAt`) nhưng CÙNG có `titleHtml`/`contentHtml` — `searchSavedArticles` genericize theo
+ * hình dạng tối thiểu đó thay vì nhân đôi thuật toán quét (brief Task 315, rào #3). Chữ ký gọi
+ * cũ (`SavedArticle[]`) không đổi — 6 phép thử cũ của hàm này giữ xanh nguyên, không sửa.
+ *
+ * `buildSavedSearchViewState` (nhánh ĐÃ đăng nhập) giữ NGUYÊN — không sửa dòng nào, kể cả
+ * case `signInRequired` (chỉ còn ý nghĩa khi có người gọi hàm này với `isSignedIn: false`, màn
+ * hình giờ không còn gọi ở nhánh đó nữa — xem `buildCachedSearchViewState` bên dưới). `AD-21`
+ * dùng bảng ánh xạ RÕ RÀNG "trạng thái đăng nhập -> phân vùng nào" tại `NewsListScreen.tsx`,
+ * KHÔNG trộn hai nguồn trong cùng một hàm/chế độ (rào an toàn #6 Task 315, `AD-19`/`AD-23`).
  */
 
 /**
@@ -34,15 +48,23 @@ export function normalizeForSearch(input: string): string {
     .trim();
 }
 
+/** Hình dạng TỐI THIỂU mà `searchSavedArticles` cần — cả `SavedArticle` (phân vùng tài khoản)
+ *  lẫn `PostDetail` (phân vùng thiết bị, cache) đều thoả, không cần kiểu chung nào khác
+ *  (Task 315, tách thuật toán khỏi kiểu cụ thể thay vì nhân đôi — brief rào #3). */
+export type SearchableArticle = { titleHtml: string; contentHtml: string };
+
 /**
  * Quét tuần tự (F4): trả về các bài mà tiêu đề HOẶC nội dung (đã bóc thẻ HTML — F2) chứa từ
  * khoá sau khi chuẩn hoá (F3). Từ khoá rỗng (sau trim) trả về mảng rỗng — quyết định "khối ④
- * hiện gì khi đó" nằm ở `buildSavedSearchViewState` bên dưới, không phải ở hàm quét này.
+ * hiện gì khi đó" nằm ở `buildSavedSearchViewState`/`buildCachedSearchViewState` bên dưới,
+ * không phải ở hàm quét này. Generic theo `SearchableArticle` (Task 315) — DÙNG CHUNG cho
+ * `SavedArticle[]` (đã đăng nhập) và `PostDetail[]` (cache, chưa đăng nhập), không viết hàm
+ * quét thứ hai.
  */
-export function searchSavedArticles(
-  articles: readonly SavedArticle[],
+export function searchSavedArticles<T extends SearchableArticle>(
+  articles: readonly T[],
   query: string,
-): SavedArticle[] {
+): T[] {
   const needle = normalizeForSearch(query);
   if (needle.length === 0) return [];
   return articles.filter((article) => {
@@ -88,6 +110,39 @@ export function buildSavedSearchViewState(input: SavedSearchInput): SavedSearchV
   if (input.savedArticles.length === 0) return { kind: 'noSavedArticles' };
 
   const results = searchSavedArticles(input.savedArticles, trimmedQuery);
+  if (results.length === 0) return { kind: 'noMatch' };
+
+  return { kind: 'results', articles: results };
+}
+
+/**
+ * Khối ④ ở NHÁNH CHƯA đăng nhập (Task 315, `AD-21`) — tìm trên CACHE (phân vùng thiết bị,
+ * `PostDetail[]` từ `articleCache.getAllCachedArticles()`), KHÔNG phải bài đã lưu. Song song
+ * với `buildSavedSearchViewState` (nhánh đã đăng nhập, không sửa) chứ KHÔNG gộp chung một hàm
+ * — `NewsListScreen.tsx` chọn đúng MỘT trong hai theo `isSignedIn()`, không có chế độ tìm cả
+ * hai nguồn (rào an toàn #6). Ba trạng thái rỗng của TOÀN task 315 phân định như sau, không
+ * gộp: `noCachedArticles` (cache trống) khác `noMatch` (cache có bài, không khớp) khác
+ * `noSavedArticles` của `buildSavedSearchViewState` (đã đăng nhập, chưa lưu bài nào).
+ */
+export type CachedSearchViewState =
+  | { kind: 'idle' }
+  | { kind: 'noCachedArticles' }
+  | { kind: 'noMatch' }
+  | { kind: 'results'; articles: PostDetail[] };
+
+export type CachedSearchInput = {
+  /** Toàn bộ bài đã cache của phân vùng thiết bị — `articleCache.getAllCachedArticles()`. */
+  cachedArticles: readonly PostDetail[];
+  query: string;
+};
+
+export function buildCachedSearchViewState(input: CachedSearchInput): CachedSearchViewState {
+  const trimmedQuery = input.query.trim();
+  if (trimmedQuery.length === 0) return { kind: 'idle' };
+
+  if (input.cachedArticles.length === 0) return { kind: 'noCachedArticles' };
+
+  const results = searchSavedArticles(input.cachedArticles, trimmedQuery);
   if (results.length === 0) return { kind: 'noMatch' };
 
   return { kind: 'results', articles: results };

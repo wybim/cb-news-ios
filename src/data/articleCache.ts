@@ -43,6 +43,16 @@ export async function getCachedArticleIds(): Promise<number[]> {
   return Object.keys(cache).map(Number);
 }
 
+/**
+ * Toàn bộ bài đã cache (Task 315, BLI 299 — `AD-21`) — nguồn cho ô tìm kiếm khi CHƯA đăng
+ * nhập (khối ④, `savedArticlesSearch.ts`). Đọc lại đúng blob đã có (`readCache()`), KHÔNG lớp
+ * lưu trữ thứ hai (`F1`).
+ */
+export async function getAllCachedArticles(): Promise<PostDetail[]> {
+  const cache = await readCache();
+  return Object.values(cache);
+}
+
 async function putCachedArticle(article: PostDetail): Promise<void> {
   const cache = await readCache();
   const next: ArticleCacheState = { ...cache, [article.id]: article };

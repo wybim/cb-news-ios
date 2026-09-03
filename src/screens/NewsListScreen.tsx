@@ -12,12 +12,13 @@ import {
   type StyleProp,
   type ViewStyle,
 } from 'react-native';
-import { fetchNewsPage, NewsApiError, type PostSummary } from '../api/newsApi';
+import { fetchNewsPage, NewsApiError, type PostDetail, type PostSummary } from '../api/newsApi';
 import { ArticleImage } from '../components/ArticleImage';
 import { InlineHtmlText } from '../components/RenderedHtml';
 import { formatVietnameseDate } from '../utils/formatDate';
 import { useSavedArticles, type SavedArticle } from '../data/savedArticles';
 import { loadHomeSectionsData } from '../data/homeData';
+import { getAllCachedArticles } from '../data/articleCache';
 import { buildHomeSections, formatSyncTime, type HomeSectionsInput } from '../state/homeSections';
 import {
   homeListColumns,
@@ -25,7 +26,7 @@ import {
   resolveHomeLayoutMetrics,
   resolveHomeLayoutMode,
 } from '../state/homeLayout';
-import { buildSavedSearchViewState } from '../state/savedArticlesSearch';
+import { buildCachedSearchViewState, buildSavedSearchViewState } from '../state/savedArticlesSearch';
 import { isSignedIn } from '../state/accessPolicy';
 import type { AccountState } from '../state/accountStore';
 import { triggerManualRefresh } from '../background/manualRefresh';
@@ -64,6 +65,14 @@ const EMPTY_HOME_DATA: HomeSectionsInput = {
  * ② nằm cùng một hàng thay vì xếp chồng, và danh sách bài chuyển sang lưới hai cột. Quyết
  * định "bề rộng nào ra cách xếp nào" nằm ở `homeLayout.ts` (hàm thuần, có phép thử) — ở đây
  * chỉ đọc `useWindowDimensions()` rồi vẽ theo kết quả của hàm đó.
+ *
+ * Task 315 (BLI 299, `AD-21`) — SỬA rào PM đặt sai ở brief Task 309: khối ④ giờ chạy được khi
+ * CHƯA đăng nhập, không còn hiện lời mời đăng nhập chặn chức năng (đúng hình dạng Guideline
+ * 5.1.1(v) Apple từ chối, xem work item 312/315). Rẽ nhánh DUY NHẤT theo `isSignedIn(account)`:
+ * đã đăng nhập → `buildSavedSearchViewState` tìm trên bài ĐÃ LƯU (JSX/hành vi Y NGUYÊN Task
+ * 309, không sửa); CHƯA đăng nhập → `buildCachedSearchViewState` tìm trên CACHE (phân vùng
+ * thiết bị, `articleCache.getAllCachedArticles()`), một ô nhập liệu dùng được thật. KHÔNG trộn
+ * hai nguồn (rào an toàn #6 Task 315, `AD-19`/`AD-23`) — luôn đúng một nhánh tại một thời điểm.
  */
 export function NewsListScreen({
   account,
@@ -153,13 +162,29 @@ export function NewsListScreen({
     void loadHomeData();
   }, [loadHomeData]);
 
+  // Task 315 — nguồn tìm kiếm cho khối ④ khi CHƯA đăng nhập: toàn bộ bài đã cache (phân vùng
+  // thiết bị, `articleCache.getAllCachedArticles()`). Nạp không phụ thuộc trạng thái đăng nhập
+  // (cùng phân vùng với 3 khối trên, `F3`/`AD-22`) — chỉ KHÔNG dùng tới khi đã đăng nhập.
+  const [cachedArticles, setCachedArticles] = useState<PostDetail[]>([]);
+
+  const loadCachedArticles = useCallback(async () => {
+    const articles = await getAllCachedArticles();
+    setCachedArticles(articles);
+  }, []);
+
+  useEffect(() => {
+    void loadCachedArticles();
+  }, [loadCachedArticles]);
+
   const homeSections = useMemo(() => buildHomeSections(homeData ?? EMPTY_HOME_DATA), [homeData]);
   const continueReadingSection = homeSections.find((s) => s.kind === 'continueReading');
   const offlineReadySection = homeSections.find((s) => s.kind === 'offlineReady');
 
   // Nút "Làm mới" thủ công (F5/AD-18): gọi ĐÚNG MỘT chu trình đã có qua `manualRefresh.ts`
   // (KHÔNG dựng chu trình thứ hai), rồi nạp lại dữ liệu trên màn — cả danh sách LẪN 3 khối
-  // home, vì chu trình đó có thể vừa đổi cache offline/mốc đồng-bộ (khối ②).
+  // home, vì chu trình đó có thể vừa đổi cache offline/mốc đồng-bộ (khối ②). Task 315: nạp lại
+  // CẢ `cachedArticles` — chu trình có thể vừa thêm bài mới vào cache, khối ④ (guest) phải tìm
+  // được trên dữ liệu mới nhất, không phải bản chụp lúc mount.
   const handleManualRefresh = useCallback(async () => {
     setManualRefreshing(true);
     try {
@@ -167,27 +192,33 @@ export function NewsListScreen({
     } finally {
       setManualRefreshing(false);
     }
-    await Promise.all([loadPage(1, true), loadHomeData()]);
-  }, [loadPage, loadHomeData]);
+    await Promise.all([loadPage(1, true), loadHomeData(), loadCachedArticles()]);
+  }, [loadPage, loadHomeData, loadCachedArticles]);
 
   const savedList = useMemo<SavedArticle[]>(
     () => Object.values(savedMap).sort((a, b) => (a.savedAt < b.savedAt ? 1 : -1)),
     [savedMap],
   );
 
-  // Task 309 — khối ④ (ô tìm kiếm trong bài đã lưu). `isSignedIn(account)` là NƠI DUY NHẤT
-  // hỏi trạng thái đăng nhập (rào an toàn #5); `buildSavedSearchViewState` là hàm THUẦN quyết
-  // định hiện gì (mời đăng nhập / rỗng / chưa lưu bài nào / không khớp / kết quả) — xem
-  // `savedArticlesSearch.ts`.
+  // Task 309/315 — khối ④ (ô tìm kiếm). `isSignedIn(account)` là NƠI DUY NHẤT hỏi trạng thái
+  // đăng nhập (rào an toàn #5 Task 315/#5 Task 309) — chọn ĐÚNG MỘT nhánh nguồn dữ liệu, không
+  // trộn (rào an toàn #6 Task 315): đã đăng nhập → bài ĐÃ LƯU (`buildSavedSearchViewState`,
+  // hành vi Task 309 y nguyên); CHƯA đăng nhập → CACHE thiết bị (`buildCachedSearchViewState`,
+  // Task 315). Cả hai đều là hàm THUẦN, có phép thử — ở đây chỉ vẽ theo kết quả.
+  const signedIn = isSignedIn(account);
   const [savedSearchQuery, setSavedSearchQuery] = useState('');
   const savedSearchView = useMemo(
     () =>
       buildSavedSearchViewState({
-        isSignedIn: isSignedIn(account),
+        isSignedIn: signedIn,
         savedArticles: savedList,
         query: savedSearchQuery,
       }),
-    [account, savedList, savedSearchQuery],
+    [signedIn, savedList, savedSearchQuery],
+  );
+  const cachedSearchView = useMemo(
+    () => buildCachedSearchViewState({ cachedArticles, query: savedSearchQuery }),
+    [cachedArticles, savedSearchQuery],
   );
 
   const showInitialLoading = tab === 'latest' && loading && posts.length === 0 && !error;
@@ -246,24 +277,26 @@ export function NewsListScreen({
           )}
         </View>
 
+        {/* Task 315 — khối ④ chạy được ở CẢ hai trạng thái đăng nhập, đúng một nhánh nguồn dữ
+            liệu tại một thời điểm (rào an toàn #6). Ô nhập liệu luôn thật, không còn text mời
+            đăng nhập đứng thay chức năng khi guest (rào an toàn Guideline 5.1.1(v)). */}
         <View style={styles.searchBlock}>
-          <Text style={styles.sectionLabel}>Tìm trong bài đã lưu</Text>
-          {savedSearchView.kind === 'signInRequired' ? (
-            <Text style={styles.searchHint}>
-              Đăng nhập ở mục Tài khoản để tìm trong bài bạn đã lưu — bài lưu thuộc về tài
-              khoản của bạn.
-            </Text>
-          ) : (
+          <Text style={styles.sectionLabel}>
+            {signedIn ? 'Tìm trong bài đã lưu' : 'Tìm trong bài đã tải sẵn'}
+          </Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder={
+              signedIn ? 'Tìm theo tiêu đề hoặc nội dung…' : 'Tìm trong bài đã tải sẵn…'
+            }
+            value={savedSearchQuery}
+            onChangeText={setSavedSearchQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {signedIn ? (
             <>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Tìm theo tiêu đề hoặc nội dung…"
-                value={savedSearchQuery}
-                onChangeText={setSavedSearchQuery}
-                autoCapitalize="none"
-                autoCorrect={false}
-                returnKeyType="search"
-              />
               {savedSearchView.kind === 'noSavedArticles' && (
                 <Text style={styles.searchHint}>Bạn chưa lưu bài nào để tìm.</Text>
               )}
@@ -275,6 +308,30 @@ export function NewsListScreen({
               {savedSearchView.kind === 'results' && (
                 <View>
                   {savedSearchView.articles.map((article) => (
+                    <ArticleRow
+                      key={article.id}
+                      post={article}
+                      onPress={() => onOpenArticle(article.id)}
+                    />
+                  ))}
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              {cachedSearchView.kind === 'noCachedArticles' && (
+                <Text style={styles.searchHint}>
+                  Chưa có bài nào tải sẵn để tìm — kéo để làm mới hoặc chờ đồng bộ nền.
+                </Text>
+              )}
+              {cachedSearchView.kind === 'noMatch' && (
+                <Text style={styles.searchHint}>
+                  Không tìm thấy bài đã tải sẵn nào khớp “{savedSearchQuery.trim()}”.
+                </Text>
+              )}
+              {cachedSearchView.kind === 'results' && (
+                <View>
+                  {cachedSearchView.articles.map((article) => (
                     <ArticleRow
                       key={article.id}
                       post={article}

@@ -6,9 +6,11 @@
  */
 
 import type { SavedArticle } from '../../data/savedArticles';
+import type { PostDetail } from '../../api/newsApi';
 import type { ReadingProgressEntry } from '../../data/readingProgress';
 import { buildHomeSections } from '../homeSections';
 import {
+  buildCachedSearchViewState,
   buildSavedSearchViewState,
   normalizeForSearch,
   searchSavedArticles,
@@ -34,6 +36,32 @@ const ARTICLE_TIENG_ANH = saved(
 );
 const ARTICLE_KHAC = saved(
   2,
+  '<p>Thời tiết Hà Nội hôm nay</p>',
+  '<div><p>Trời nắng, chia đôi ngày.</p></div>',
+);
+
+/** Task 315 — bài trong CACHE (phân vùng thiết bị, `PostDetail`, KHÔNG có `savedAt`) — kiểu
+ *  khác `SavedArticle` nhưng cùng hình dạng `titleHtml`/`contentHtml` mà `searchSavedArticles`
+ *  cần (xem `SearchableArticle` ở `../savedArticlesSearch.ts`). */
+function cached(id: number, titleHtml: string, contentHtml: string): PostDetail {
+  return {
+    id,
+    link: `https://cbcentres.com/bai-${id}`,
+    date: '2026-08-31T00:00:00',
+    titleHtml,
+    excerptHtml: '<p>tom tat</p>',
+    imageUrl: null,
+    contentHtml,
+  };
+}
+
+const CACHED_TIENG_ANH = cached(
+  11,
+  '<p>Học <strong>tiếng Anh</strong> mỗi ngày</p>',
+  '<div><p>Bài viết nói về cách luyện <em>tiếng Anh</em> hiệu quả.</p></div>',
+);
+const CACHED_KHAC = cached(
+  12,
   '<p>Thời tiết Hà Nội hôm nay</p>',
   '<div><p>Trời nắng, chia đôi ngày.</p></div>',
 );
@@ -160,5 +188,56 @@ describe('buildSavedSearchViewState — khối ④ hiện gì, SÁU hành vi gia
       const offlineReady = homeSections.find((s) => s.kind === 'offlineReady');
       expect(offlineReady).toMatchObject({ count: 3, lastSyncedAt: '2026-09-03T09:00:00.000Z' });
     });
+  });
+});
+
+describe('buildCachedSearchViewState — khối ④ ở NHÁNH CHƯA đăng nhập, tìm trên cache (Task 315, AD-21)', () => {
+  it('từ khoá rỗng → "idle" (giống nhánh đã đăng nhập, không báo lỗi)', () => {
+    const view = buildCachedSearchViewState({ cachedArticles: [CACHED_TIENG_ANH], query: '   ' });
+    expect(view).toEqual({ kind: 'idle' });
+  });
+
+  it('trạng thái rỗng 1/3 — cache TRỐNG (chưa lượt làm mới nào) → "noCachedArticles", KHÁC "noMatch" và "noSavedArticles"', () => {
+    const view = buildCachedSearchViewState({ cachedArticles: [], query: 'bat ky' });
+    expect(view).toEqual({ kind: 'noCachedArticles' });
+    expect(view.kind).not.toBe('noMatch');
+  });
+
+  it('trạng thái rỗng 2/3 — cache CÓ bài nhưng từ khoá không khớp → "noMatch", KHÁC "noCachedArticles"', () => {
+    const view = buildCachedSearchViewState({
+      cachedArticles: [CACHED_TIENG_ANH, CACHED_KHAC],
+      query: 'bong da',
+    });
+    expect(view).toEqual({ kind: 'noMatch' });
+    expect(view.kind).not.toBe('noCachedArticles');
+  });
+
+  it('có khớp (kể cả gõ không dấu) → "results" đúng bài khớp, dùng LẠI searchSavedArticles/normalizeForSearch không viết thuật toán thứ hai', () => {
+    const view = buildCachedSearchViewState({
+      cachedArticles: [CACHED_TIENG_ANH, CACHED_KHAC],
+      query: 'tieng anh',
+    });
+    expect(view).toEqual({ kind: 'results', articles: [CACHED_TIENG_ANH] });
+  });
+
+  it('trạng thái rỗng 3/3 — ĐÃ đăng nhập, chưa lưu bài nào → "noSavedArticles" của buildSavedSearchViewState, không lẫn với "noCachedArticles"/"noMatch" của nhánh guest', () => {
+    const signedInView = buildSavedSearchViewState({ isSignedIn: true, savedArticles: [], query: 'bat ky' });
+    expect(signedInView).toEqual({ kind: 'noSavedArticles' });
+    expect(signedInView.kind).not.toBe('noCachedArticles');
+    expect(signedInView.kind).not.toBe('noMatch');
+  });
+
+  it('PHÂN ĐỊNH (DoD Task 315 mục 2) — CHƯA đăng nhập: ô tìm kiếm trả kết quả THẬT từ cache, và trạng thái không phải bất kỳ dạng mời-đăng-nhập/rỗng nào', () => {
+    const view = buildCachedSearchViewState({
+      cachedArticles: [CACHED_TIENG_ANH, CACHED_KHAC],
+      query: 'Tiếng Anh',
+    });
+
+    expect(view.kind).toBe('results');
+    expect(view.kind === 'results' && view.articles.map((a) => a.id)).toEqual([11]);
+    // `CachedSearchViewState` (kiểu trả về của hàm này) về CẤU TRÚC không có kind nào tên
+    // "signInRequired" — khối ④ guest không thể rơi vào lời mời đăng nhập đứng thay chức
+    // năng (rào an toàn Guideline 5.1.1(v), work item 312/315), khác `buildSavedSearchViewState`.
+    expect(['idle', 'noCachedArticles', 'noMatch', 'results']).toContain(view.kind);
   });
 });
