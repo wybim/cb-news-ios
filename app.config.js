@@ -86,12 +86,16 @@ module.exports = {
         '@react-native-google-signin/google-signin',
         { iosUrlScheme: deriveGoogleIosUrlScheme(GOOGLE_IOS_CLIENT_ID) },
       ],
-      // Task 305 (BLI 299, AD-18): `npx expo install expo-background-task` tự yêu cầu
-      // khai plugin này (lệnh in ra "Cannot automatically write to dynamic config",
-      // kèm đúng khối JSON dưới đây) — nó tự áp `UIBackgroundModes: ["processing"]` +
-      // `BGTaskSchedulerPermittedIdentifiers` vào Info.plist lúc prebuild. Không cấu
-      // hình gì thêm (không tuỳ chọn nào để truyền).
-      'expo-background-task',
+      // Task 306 (BLI 299, AD-18): Task 305 dùng `expo-background-task`, tự áp
+      // `UIBackgroundModes: ["processing"]` — đúng phương án bản ghi kiến trúc `AD-18`
+      // đã LOẠI (mục "phương án đã loại + lý do", điểm (iii): "dùng cơ chế xử lý nền
+      // dài hạn thay vì làm-mới-nền → sai loại tác vụ"). Đổi sang `expo-background-fetch`
+      // (còn tồn tại ở SDK 57, deprecated nhưng chưa bị bỏ — docs.expo.dev/versions/
+      // v57.0.0/sdk/background-fetch/); plugin của nó (đọc mã nguồn thật,
+      // packages/expo-background-fetch/plugin, nhánh sdk-57 repo expo/expo) chỉ đẩy
+      // `'fetch'` vào `UIBackgroundModes`, KHÔNG có `BGTaskSchedulerPermittedIdentifiers`.
+      // Không cấu hình gì thêm (không tuỳ chọn nào để truyền).
+      'expo-background-fetch',
     ],
   },
 };

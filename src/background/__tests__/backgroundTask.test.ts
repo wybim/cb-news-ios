@@ -4,6 +4,11 @@
  * phải gọi thẳng `runNewsRefreshCycle()` (module dùng CHUNG với đường tiền cảnh — xem
  * `appLifecycle.test.ts`), không tự viết logic bốn việc riêng ở đây.
  *
+ * Task 306 (BLI 299, AD-18): đổi mock từ `expo-background-task` (chế độ `processing` —
+ * đúng phương án `AD-18` đã loại) sang `expo-background-fetch` (chế độ `fetch`), theo
+ * đúng đổi đường đăng ký ở `backgroundTask.ts`. Năm kịch bản kiểm giữ nguyên, chỉ đổi
+ * tên module/enum cho khớp API thật.
+ *
  * `TaskManager.defineTask()` chạy NGAY lúc import module (phạm vi module, bắt buộc theo
  * tài liệu Expo) — nên các `jest.fn()` phải được tạo NGAY BÊN TRONG factory của
  * `jest.mock()` (không tham chiếu biến ngoài) rồi lấy lại tham chiếu qua `import *` SAU khi
@@ -19,9 +24,9 @@ jest.mock('expo-task-manager', () => ({
   isTaskRegisteredAsync: jest.fn(),
 }));
 
-jest.mock('expo-background-task', () => ({
+jest.mock('expo-background-fetch', () => ({
   __esModule: true,
-  BackgroundTaskResult: { Success: 1, Failed: 2 },
+  BackgroundFetchResult: { NoData: 1, NewData: 2, Failed: 3 },
   registerTaskAsync: jest.fn(),
 }));
 
@@ -31,13 +36,13 @@ jest.mock('../newsRefreshCycle', () => ({
 }));
 
 import * as TaskManager from 'expo-task-manager';
-import * as BackgroundTask from 'expo-background-task';
+import * as BackgroundFetch from 'expo-background-fetch';
 import { runNewsRefreshCycle } from '../newsRefreshCycle';
 import { NEWS_BACKGROUND_TASK_IDENTIFIER, registerNewsBackgroundTaskAsync } from '../backgroundTask';
 
 const mockDefineTask = TaskManager.defineTask as jest.Mock;
 const mockIsTaskRegisteredAsync = TaskManager.isTaskRegisteredAsync as jest.Mock;
-const mockRegisterTaskAsync = BackgroundTask.registerTaskAsync as jest.Mock;
+const mockRegisterTaskAsync = BackgroundFetch.registerTaskAsync as jest.Mock;
 const mockRunNewsRefreshCycle = runNewsRefreshCycle as jest.Mock;
 
 beforeEach(() => {
@@ -52,14 +57,14 @@ describe('backgroundTask — ĐÚNG MỘT task identifier, gọi thẳng runNews
     expect(mockDefineTask.mock.calls[0][0]).toBe(NEWS_BACKGROUND_TASK_IDENTIFIER);
   });
 
-  it('callback của task gọi runNewsRefreshCycle() và trả Success khi thành công', async () => {
+  it('callback của task gọi runNewsRefreshCycle() và trả NewData khi thành công', async () => {
     mockRunNewsRefreshCycle.mockResolvedValueOnce({ ok: true });
     const taskExecutor = mockDefineTask.mock.calls[0][1] as () => Promise<unknown>;
 
     const result = await taskExecutor();
 
     expect(mockRunNewsRefreshCycle).toHaveBeenCalled();
-    expect(result).toBe(BackgroundTask.BackgroundTaskResult.Success);
+    expect(result).toBe(BackgroundFetch.BackgroundFetchResult.NewData);
   });
 
   it('callback trả Failed khi runNewsRefreshCycle ném lỗi (không để lượt nền crash)', async () => {
@@ -68,7 +73,7 @@ describe('backgroundTask — ĐÚNG MỘT task identifier, gọi thẳng runNews
 
     const result = await taskExecutor();
 
-    expect(result).toBe(BackgroundTask.BackgroundTaskResult.Failed);
+    expect(result).toBe(BackgroundFetch.BackgroundFetchResult.Failed);
   });
 
   it('registerNewsBackgroundTaskAsync KHÔNG đăng ký lại nếu task đã đăng ký rồi', async () => {
