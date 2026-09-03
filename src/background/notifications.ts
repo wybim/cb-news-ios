@@ -52,15 +52,20 @@ export async function hasNotificationPermissionAsync(): Promise<boolean> {
 }
 
 /**
- * Lên lịch MỘT thông báo cục bộ cho "có bài mới" — `trigger: null` (hiện ngay khi hệ
+ * Lên lịch MỘT thông báo cục bộ cho "có bài chưa đọc" — `trigger: null` (hiện ngay khi hệ
  * thống xử lý lượt gọi này, dù đang ở lượt nền hay lượt tiền cảnh — `AD-25`). Trả `false`
  * nếu chưa có quyền hoặc `scheduleNotificationAsync` lỗi — KHÔNG throw, vì đây là một
  * nhánh trong việc ② của handler bốn việc và không được chặn việc ③/④ phía sau (`AD-18`).
  * CHỈ kiểm quyền (`hasNotificationPermissionAsync`), KHÔNG xin — chưa có quyền thì bỏ qua
  * việc lên lịch trong im lặng, không bật hộp thoại nào (Task 308).
+ *
+ * Tiêu đề nói về bài CHƯA ĐỌC, không nói "N bài mới" (Task 314, BLI 299, `DoD 4`):
+ * `unreadCount` do `newsRefreshCycle.ts` đếm bằng `readingProgress`, không phải bằng so
+ * mốc ngày/id — nên có thể đúng cả khi bài đã có sẵn từ trước, không phải mới đăng. Nói
+ * "N bài mới" trong trường hợp đó là sai sự thật, điều `AD-25` loại thẳng.
  */
 export async function scheduleNewArticleNotification(
-  newArticleCount: number,
+  unreadCount: number,
   latestArticle: Pick<PostSummary, 'titleHtml'>,
 ): Promise<boolean> {
   try {
@@ -68,7 +73,7 @@ export async function scheduleNewArticleNotification(
     if (!granted) return false;
     await Notifications.scheduleNotificationAsync({
       content: {
-        title: newArticleCount > 1 ? `${newArticleCount} bài mới trên CB News` : 'Có bài mới trên CB News',
+        title: unreadCount > 1 ? `Có ${unreadCount} bài bạn chưa đọc` : 'Có 1 bài bạn chưa đọc',
         body: inlineTextOnly(latestArticle.titleHtml),
       },
       trigger: null,

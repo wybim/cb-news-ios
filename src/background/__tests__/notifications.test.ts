@@ -123,6 +123,31 @@ describe('scheduleNewArticleNotification (đường lên lịch — chỉ KIỂM
     expect(mockRequestPermissionsAsync).not.toHaveBeenCalled();
   });
 
+  // Task 314 (BLI 299, DoD 4): tiêu đề nói về bài CHƯA ĐỌC, không nói "N bài mới" — số đếm
+  // được (`unreadCount`, xem `newsRefreshCycle.ts:countUnreadPosts`) là bài chưa đọc, có thể
+  // đúng cả khi bài không mới đăng. Nói "mới" trong trường hợp đó là sai sự thật (`AD-25`).
+  it('title nói về bài CHƯA ĐỌC (N>1: "Có N bài bạn chưa đọc"), KHÔNG còn chữ "mới"', async () => {
+    mockGetPermissionsAsync.mockResolvedValueOnce({ granted: true, canAskAgain: true });
+    mockScheduleNotificationAsync.mockResolvedValueOnce('id-2');
+
+    await scheduleNewArticleNotification(5, { titleHtml: '<p>x</p>' });
+
+    const call = mockScheduleNotificationAsync.mock.calls[0][0];
+    expect(call.content.title).toBe('Có 5 bài bạn chưa đọc');
+    expect(call.content.title).not.toMatch(/mới/);
+  });
+
+  it('title số ít (N=1): "Có 1 bài bạn chưa đọc", KHÔNG còn chữ "mới"', async () => {
+    mockGetPermissionsAsync.mockResolvedValueOnce({ granted: true, canAskAgain: true });
+    mockScheduleNotificationAsync.mockResolvedValueOnce('id-3');
+
+    await scheduleNewArticleNotification(1, { titleHtml: '<p>x</p>' });
+
+    const call = mockScheduleNotificationAsync.mock.calls[0][0];
+    expect(call.content.title).toBe('Có 1 bài bạn chưa đọc');
+    expect(call.content.title).not.toMatch(/mới/);
+  });
+
   it('chưa có quyền, dù canAskAgain=true → trả false, KHÔNG xin quyền, KHÔNG lên lịch (đóng lỗ AD-25)', async () => {
     // canAskAgain:true CỐ Ý — đây là ca mà hành vi CŨ (ensureNotificationPermissionsAsync)
     // sẽ bật hộp thoại xin quyền; hành vi MỚI của đường lên lịch phải im lặng bỏ qua.

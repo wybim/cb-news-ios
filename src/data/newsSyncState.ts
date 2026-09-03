@@ -6,10 +6,11 @@ import { DEVICE_PARTITION, buildPartitionStorageKey } from './localPartitions';
  *
  * HAI khoá TÁCH RIÊNG dù cùng vòng đời đọc/ghi trong `newsRefreshCycle.ts`, vì `AD-23`
  * phân loại xoá KHÁC NHAU (đăng ký ở `localUserData.ts`):
- * - `lastKnownArticleMarker` ("mốc đã-đọc", `AD-17`) — bài mới nhất mà máy ĐÃ BIẾT tới
- *   (đã lấy danh sách/đã thông báo), dùng để so sánh phát hiện "có bài mới". Đây là dữ
- *   liệu NÓI VỀ CON NGƯỜI (máy này đã "thấy" tin tới đâu) → PHẢI bị quét khi xoá tài khoản
- *   (`sweepOnAccountDeletion: true`).
+ * - `lastKnownArticleMarker` ("mốc đã-đọc", `AD-17`) — bài mới nhất mà máy ĐÃ THÔNG BÁO
+ *   (Task 314, BLI 299, `DoD 4`: mốc chỉ tiến khi một thông báo đã THẬT SỰ được lên lịch —
+ *   xem `newsRefreshCycle.ts:detectNewArticlesAndSchedule`), dùng để so sánh phát hiện "có
+ *   bài mới cần báo tiếp". Đây là dữ liệu NÓI VỀ CON NGƯỜI (máy này đã báo tin tới đâu) →
+ *   PHẢI bị quét khi xoá tài khoản (`sweepOnAccountDeletion: true`).
  * - `lastSyncedAt` ("mốc đồng-bộ lần cuối") — chỉ ghi lại THỜI ĐIỂM lượt chạy nền/tiền
  *   cảnh gần nhất đã chạy xong tới hết việc ③ (`AD-18`) — không tiết lộ gì về người dùng
  *   → KHÔNG bị quét (`sweepOnAccountDeletion: false`).
@@ -30,7 +31,11 @@ function isMarker(value: unknown): value is LastKnownArticleMarker {
   return typeof v.id === 'number' && typeof v.date === 'string';
 }
 
-/** `null` nghĩa là máy này CHƯA TỪNG chạy một lượt làm mới nào (bootstrap). */
+/**
+ * `null` nghĩa là máy này CHƯA TỪNG lên lịch một thông báo "có bài chưa đọc" nào thành
+ * công (Task 314, `DoD 4`) — có thể vì chưa từng chạy lượt làm mới nào, HOẶC đã chạy nhiều
+ * lượt nhưng chưa lần nào lên lịch được (chưa có quyền thông báo).
+ */
 export async function getLastKnownArticleMarker(): Promise<LastKnownArticleMarker | null> {
   try {
     const raw = await AsyncStorage.getItem(LAST_KNOWN_ARTICLE_MARKER_STORAGE_KEY);

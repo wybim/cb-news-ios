@@ -2,6 +2,7 @@ import { fetchNewsPage, type PostSummary } from '../api/newsApi';
 import { getLastKnownArticleMarker, setLastKnownArticleMarker, setLastSyncedAt } from '../data/newsSyncState';
 import { cacheArticlesForOfflineReading, type OfflineCacheOutcome } from '../data/articleCache';
 import { writeWidgetSnapshot } from '../data/widgetSnapshot';
+import { getAllReadingProgress } from '../data/readingProgress';
 import { scheduleNewArticleNotification } from './notifications';
 
 /**
@@ -26,6 +27,13 @@ import { scheduleNewArticleNotification } from './notifications';
  * đồng thời (vd app vừa mở vừa có một lượt nền đến hạn) — nếu đã có một lượt đang chạy,
  * lượt gọi thêm CHIA SẺ promise đang chạy thay vì khởi một lượt song song (tránh hai lượt
  * cùng ghi đè `newsSyncState`/`articleCache` — vẫn đúng "MỘT lượt chạy nền" của `AD-18`).
+ *
+ * Task 314 (BLI 299, `DoD 4`): mốc `lastKnownArticleMarker` (việc ②) chỉ TIẾN khi một
+ * thông báo đã THẬT SỰ được lên lịch (`scheduleNewArticleNotification` trả `true`) — xem
+ * `detectNewArticlesAndSchedule` bên dưới. Trước Task 314, mốc luôn tiến ngay ở lượt tải
+ * đầu tiên bất kể có thông báo hay không, khiến thông báo không thể chứng minh được trong
+ * một phiên duyệt trên máy mới cài (lượt đầu tiêu thụ hết "cái mới" trước khi người dùng
+ * kịp cấp quyền).
  */
 
 export const NEWS_LIST_PAGE_SIZE = 10;
@@ -48,19 +56,32 @@ const EMPTY_RESULT: NewsRefreshCycleResult = {
 };
 
 /**
- * So bài `post` với mốc đã-đọc: mới hơn nếu `date` mới hơn; nếu `date` trùng giây (WordPress
- * chỉ ghi tới giây) thì so `id` làm phân định phụ (WordPress cấp id tăng dần theo thời gian
- * đăng). `post.id === marker.id` (đúng bài đã biết) luôn cho kết quả `false` qua nhánh `id`.
+ * Đếm bài trong `posts` (danh sách VỪA TẢI, `NEWS_LIST_PAGE_SIZE` bài) mà người dùng CHƯA
+ * mở đọc — không có bản ghi trong `readingProgress` (Task 314, BLI 299, `DoD 4`). Dùng làm
+ * số N trong nội dung thông báo VÀ là vế-1 của điều kiện lên lịch bên dưới. KHÔNG so
+ * `date`/`id` với mốc — đúng ngay cả khi bài đã có sẵn từ trước (không mới đăng) nhưng
+ * người dùng chưa đọc, nên không được nói "N bài mới" khi con số này là bài chưa đọc
+ * (`AD-25` loại thông báo nói không đúng sự thật).
  */
-function isNewerThanMarker(post: PostSummary, marker: { id: number; date: string }): boolean {
-  if (post.date !== marker.date) return post.date > marker.date;
-  return post.id > marker.id;
+async function countUnreadPosts(posts: readonly PostSummary[]): Promise<number> {
+  const progress = await getAllReadingProgress();
+  const readIds = new Set(progress.map((entry) => entry.articleId));
+  return posts.reduce((count, post) => (readIds.has(post.id) ? count : count + 1), 0);
 }
 
 /**
- * Việc ② — so mốc đã-đọc lưu cục bộ (`AD-17`), lệch thì lên lịch thông báo (`AD-16`).
- * Lần ĐẦU TIÊN máy này chạy (chưa có mốc) là "bootstrap": chỉ thiết lập mốc, KHÔNG thông
- * báo gì — tránh xin quyền/thông báo ngay lượt mở app đầu tiên (bám tinh thần `F5`).
+ * Việc ② — điều kiện lên lịch thông báo (Task 314, BLI 299, `DoD 4`), CẢ HAI vế phải đúng:
+ *   (1) có ít nhất một bài trong `posts` mà người dùng CHƯA đọc (`countUnreadPosts` > 0);
+ *   (2) bài mới nhất vừa tải KHÁC bài ghi trong mốc (`newest.id !== marker.id`), hoặc mốc
+ *       còn `null`.
+ *
+ * `lastKnownArticleMarker` giờ mang nghĩa "bài mới nhất máy ĐÃ THẬT SỰ thông báo về" (xem
+ * comment đầu `newsSyncState.ts`) — nên mốc CHỈ TIẾN khi `scheduleNewArticleNotification`
+ * trả về `true` (thông báo đã thật sự được lên lịch). Chưa lên lịch được (chưa có quyền,
+ * hoặc lỗi runtime) thì để NGUYÊN mốc — kể cả ở lần chạy đầu tiên (marker vẫn `null`), khác
+ * với hành vi "bootstrap chỉ thiết lập mốc" trước Task 314: nay mốc `null` không còn tự
+ * tiến nếu chưa có thông báo nào thật sự phát ra, vì đó chính là lỗ khiến `DoD 4` không đạt
+ * trên máy mới cài (thông báo không thể chứng minh được trong một phiên duyệt).
  */
 async function detectNewArticlesAndSchedule(
   posts: readonly PostSummary[],
@@ -69,17 +90,21 @@ async function detectNewArticlesAndSchedule(
   if (!newest) return { newArticlesDetected: false, notificationScheduled: false };
 
   const marker = await getLastKnownArticleMarker();
-  let newArticlesDetected = false;
-  let notificationScheduled = false;
-
-  if (marker !== null && isNewerThanMarker(newest, marker)) {
-    newArticlesDetected = true;
-    const newCount = posts.filter((p) => isNewerThanMarker(p, marker)).length;
-    notificationScheduled = await scheduleNewArticleNotification(newCount, newest);
+  const markerBehindNewest = marker === null || newest.id !== marker.id;
+  if (!markerBehindNewest) {
+    return { newArticlesDetected: false, notificationScheduled: false };
   }
 
-  await setLastKnownArticleMarker({ id: newest.id, date: newest.date });
-  return { newArticlesDetected, notificationScheduled };
+  const unreadCount = await countUnreadPosts(posts);
+  if (unreadCount === 0) {
+    return { newArticlesDetected: false, notificationScheduled: false };
+  }
+
+  const notificationScheduled = await scheduleNewArticleNotification(unreadCount, newest);
+  if (notificationScheduled) {
+    await setLastKnownArticleMarker({ id: newest.id, date: newest.date });
+  }
+  return { newArticlesDetected: true, notificationScheduled };
 }
 
 let inFlight: Promise<NewsRefreshCycleResult> | null = null;
