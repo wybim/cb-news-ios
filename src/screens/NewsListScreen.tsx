@@ -7,7 +7,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from 'react-native';
 import { fetchNewsPage, NewsApiError, type PostSummary } from '../api/newsApi';
 import { ArticleImage } from '../components/ArticleImage';
@@ -16,6 +19,7 @@ import { formatVietnameseDate } from '../utils/formatDate';
 import { useSavedArticles, type SavedArticle } from '../data/savedArticles';
 import { loadHomeSectionsData } from '../data/homeData';
 import { buildHomeSections, formatSyncTime, type HomeSectionsInput } from '../state/homeSections';
+import { homeListColumns, resolveHomeLayoutMode } from '../state/homeLayout';
 import { buildSavedSearchViewState } from '../state/savedArticlesSearch';
 import { isSignedIn } from '../state/accessPolicy';
 import type { AccountState } from '../state/accountStore';
@@ -50,6 +54,12 @@ const EMPTY_HOME_DATA: HomeSectionsInput = {
  * khối ④ hiện lời mời kèm lý do; BA khối ①②③ ở trên KHÔNG đổi, vẫn dùng được bình thường —
  * đây là rào quan trọng nhất của task (F1, dẫm lại 5.1.1(v) nếu làm sai hướng này). Quyết
  * định khối ④ hiện gì nằm ở `savedArticlesSearch.ts` (hàm thuần, có phép thử) — ở đây chỉ vẽ.
+ *
+ * Task 311 (BLI 299, khảo sát iPad thật): ở bề rộng iPad, khối ①②③④ KHÔNG đổi — `AD-21` vẫn
+ * đúng bốn khối, không thêm màn, không thêm thư viện điều hướng. Chỉ CÁCH XẾP đổi: khối ① và
+ * ② nằm cùng một hàng thay vì xếp chồng, và danh sách bài chuyển sang lưới hai cột. Quyết
+ * định "bề rộng nào ra cách xếp nào" nằm ở `homeLayout.ts` (hàm thuần, có phép thử) — ở đây
+ * chỉ đọc `useWindowDimensions()` rồi vẽ theo kết quả của hàm đó.
  */
 export function NewsListScreen({
   account,
@@ -58,6 +68,12 @@ export function NewsListScreen({
   account: AccountState;
   onOpenArticle: (postId: number) => void;
 }) {
+  // Task 311 — cách xếp theo bề rộng (`homeLayout.ts`, hàm thuần). `useWindowDimensions()` tự
+  // cập nhật khi xoay máy hoặc đổi cỡ split-view trên iPad, không cần tự đăng ký listener.
+  const { width } = useWindowDimensions();
+  const layoutMode = resolveHomeLayoutMode(width);
+  const listColumns = homeListColumns(layoutMode);
+
   const [tab, setTab] = useState<Tab>('latest');
   const [posts, setPosts] = useState<PostSummary[]>([]);
   const [page, setPage] = useState(0);
@@ -173,36 +189,41 @@ export function NewsListScreen({
           </Pressable>
         </View>
 
-        {continueReadingSection && continueReadingSection.kind === 'continueReading' && (
-          <Pressable
-            style={styles.continueCard}
-            onPress={() => onOpenArticle(continueReadingSection.entry.articleId)}
-          >
-            <Text style={styles.sectionLabel}>Đang đọc dở</Text>
-            {continueReadingSection.article ? (
-              <InlineHtmlText
-                html={continueReadingSection.article.titleHtml}
-                style={styles.continueTitle}
-                numberOfLines={2}
-              />
-            ) : (
-              <Text style={styles.continueTitle}>Bài #{continueReadingSection.entry.articleId}</Text>
-            )}
-            <Text style={styles.continueHint}>Chạm để đọc tiếp đúng chỗ đang dở</Text>
-          </Pressable>
-        )}
+        {/* Task 311: bề rộng iPad (twoColumn) → khối ①②xếp CÙNG một hàng thay vì chồng lên
+            nhau; bề rộng iPhone (single) → giữ nguyên xếp chồng như trước. Cùng nội dung,
+            khác cách xếp (`homeLayout.ts`), không đổi khối nào. */}
+        <View style={[styles.topSections, layoutMode === 'twoColumn' && styles.topSectionsRow]}>
+          {continueReadingSection && continueReadingSection.kind === 'continueReading' && (
+            <Pressable
+              style={[styles.continueCard, layoutMode === 'twoColumn' && styles.topSectionHalf]}
+              onPress={() => onOpenArticle(continueReadingSection.entry.articleId)}
+            >
+              <Text style={styles.sectionLabel}>Đang đọc dở</Text>
+              {continueReadingSection.article ? (
+                <InlineHtmlText
+                  html={continueReadingSection.article.titleHtml}
+                  style={styles.continueTitle}
+                  numberOfLines={2}
+                />
+              ) : (
+                <Text style={styles.continueTitle}>Bài #{continueReadingSection.entry.articleId}</Text>
+              )}
+              <Text style={styles.continueHint}>Chạm để đọc tiếp đúng chỗ đang dở</Text>
+            </Pressable>
+          )}
 
-        {offlineReadySection && offlineReadySection.kind === 'offlineReady' && (
-          <View style={styles.offlineRow}>
-            <Text style={styles.sectionLabel}>Đã tải sẵn để đọc offline</Text>
-            <Text style={styles.offlineText}>
-              {offlineReadySection.count} bài
-              {offlineReadySection.lastSyncedAt
-                ? ` • Đồng bộ lúc ${formatSyncTime(offlineReadySection.lastSyncedAt)}`
-                : ' • Chưa đồng bộ lần nào'}
-            </Text>
-          </View>
-        )}
+          {offlineReadySection && offlineReadySection.kind === 'offlineReady' && (
+            <View style={[styles.offlineRow, layoutMode === 'twoColumn' && styles.topSectionHalf]}>
+              <Text style={styles.sectionLabel}>Đã tải sẵn để đọc offline</Text>
+              <Text style={styles.offlineText}>
+                {offlineReadySection.count} bài
+                {offlineReadySection.lastSyncedAt
+                  ? ` • Đồng bộ lúc ${formatSyncTime(offlineReadySection.lastSyncedAt)}`
+                  : ' • Chưa đồng bộ lần nào'}
+              </Text>
+            </View>
+          )}
+        </View>
 
         <View style={styles.searchBlock}>
           <Text style={styles.sectionLabel}>Tìm trong bài đã lưu</Text>
@@ -288,9 +309,20 @@ export function NewsListScreen({
 
       {showList && (
         <FlatList
+          // Task 311: `numColumns` của RN chỉ áp dụng lúc mount — đổi `key` theo `listColumns`
+          // để buộc remount khi cách xếp đổi (vd xoay iPad giữa split-view rộng/hẹp).
+          key={`list-${listColumns}`}
           data={data}
+          numColumns={listColumns}
+          columnWrapperStyle={listColumns > 1 ? styles.listColumnWrapper : undefined}
           keyExtractor={(item) => String(item.id)}
-          renderItem={({ item }) => <ArticleRow post={item} onPress={() => onOpenArticle(item.id)} />}
+          renderItem={({ item }) => (
+            <ArticleRow
+              post={item}
+              onPress={() => onOpenArticle(item.id)}
+              style={listColumns > 1 ? styles.rowHalf : undefined}
+            />
+          )}
           refreshControl={
             tab === 'latest' ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined
           }
@@ -310,12 +342,16 @@ export function NewsListScreen({
 function ArticleRow({
   post,
   onPress,
+  style,
 }: {
   post: PostSummary | SavedArticle;
   onPress: () => void;
+  // Task 311: khi lưới hai cột (iPad), `NewsListScreen` truyền `styles.rowHalf` để mỗi ô
+  // chiếm nửa hàng — cùng nội dung/hàng vẽ, chỉ khác bề rộng.
+  style?: StyleProp<ViewStyle>;
 }) {
   return (
-    <Pressable style={styles.row} onPress={onPress}>
+    <Pressable style={[styles.row, style]} onPress={onPress}>
       <ArticleImage uri={post.imageUrl} style={styles.thumb} />
       <View style={styles.rowBody}>
         <InlineHtmlText html={post.titleHtml} style={styles.rowTitle} numberOfLines={2} />
@@ -337,6 +373,11 @@ const styles = StyleSheet.create({
   homeHeaderTitle: { fontSize: 14, fontWeight: '700', color: '#868e96', textTransform: 'uppercase' },
   refreshLink: { color: '#1971c2', fontSize: 14, fontWeight: '600' },
   sectionLabel: { fontSize: 12, fontWeight: '700', color: '#1971c2', marginBottom: 4 },
+  // Task 311: bọc khối ①②. Mặc định (single) giữ nguyên xếp chồng có gap dọc như trước;
+  // twoColumn (iPad) đổi hướng sang hàng, mỗi khối chiếm nửa (`topSectionHalf`).
+  topSections: { gap: 10 },
+  topSectionsRow: { flexDirection: 'row' },
+  topSectionHalf: { flex: 1 },
   continueCard: {
     backgroundColor: '#eef4fb',
     borderRadius: 10,
@@ -377,6 +418,10 @@ const styles = StyleSheet.create({
   retryButton: { paddingVertical: 8, paddingHorizontal: 20, backgroundColor: '#1971c2', borderRadius: 8 },
   retryText: { color: '#fff', fontWeight: '600' },
   footerSpinner: { marginVertical: 16 },
+  // Task 311: lưới hai cột ở bề rộng iPad — `columnWrapperStyle` canh khoảng cách giữa hai ô
+  // cùng hàng, `rowHalf` giới hạn mỗi ô ở nửa bề rộng (FlatList tự chia đều `flex: 1`).
+  listColumnWrapper: { gap: 16, paddingHorizontal: 16 },
+  rowHalf: { flex: 1, paddingHorizontal: 0 },
   row: { flexDirection: 'row', padding: 16, borderBottomWidth: 1, borderBottomColor: '#f1f3f5' },
   thumb: { width: 88, height: 66, borderRadius: 8, marginRight: 12 },
   rowBody: { flex: 1, justifyContent: 'center' },

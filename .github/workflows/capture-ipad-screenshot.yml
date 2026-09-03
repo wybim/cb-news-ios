@@ -1,0 +1,148 @@
+name: Khảo sát — chụp ảnh iPad 13 inch (Task 311)
+
+# Task 311 (BLI 299): dựng ĐƯỜNG lấy ảnh chụp iPad cho hồ sơ App Store Connect. App Store
+# Connect chỉ bắt buộc đúng MỘT khe "iPad - 13" Display", 2064×2752 px portrait / 2752×2064 px
+# landscape (nguồn: developer.apple.com/help/app-store-connect/reference/
+# screenshot-specifications, đọc 03/09/2026). Runner `macos-latest` (hiện = macOS 15 Arm64,
+# github.com/actions/runner-images/blob/main/images/macos/macos-15-arm64-Readme.md) có sẵn
+# device type simulator "iPad Pro 13-inch (M4)" — độ phân giải gốc CHÍNH LÀ 2752×2064
+# (support.apple.com/en-us/119891), khớp thẳng yêu cầu trên, không cần resize.
+#
+# CHỈ `workflow_dispatch` — KHÔNG trigger theo `push`/`pull_request`. Rào an toàn Task 311 cấm
+# worker tự kích hoạt bất kỳ workflow build nào (PM giữ bước đó); workflow này chỉ DỰNG SẴN,
+# PM tự bấm "Run workflow" khi muốn lấy bằng chứng thật. Build KHÔNG ký số, cho SIMULATOR
+# (-sdk iphonesimulator) — không đụng ký số/phát hành/App Store Connect, không đụng
+# build-ios.yml/release-testflight.yml hiện có.
+#
+# CHƯA ĐƯỢC CHẠY THỬ LẦN NÀO: máy KB không có Xcode/simulator để tự chạy cục bộ, và rào an
+# toàn Task 311 cấm worker tự kích hoạt CI để thử — nên đây là "đường đã dựng theo tài liệu",
+# CHƯA có bằng chứng chạy thật (xem comment kế hoạch Task 311). Lần chạy đầu tiên, đọc kỹ log
+# từng bước — đặc biệt bước "Tạo simulator" (dò device type/runtime bằng chuỗi tên, có thể cần
+# sửa nếu Apple đổi tên hiển thị).
+on:
+  workflow_dispatch:
+    inputs:
+      device_type_name:
+        description: 'Tên hiển thị device type cần dò trong `xcrun simctl list devicetypes`'
+        required: false
+        default: 'iPad Pro 13-inch (M4)'
+
+jobs:
+  capture-ipad-screenshot:
+    name: Build cho simulator + chụp ảnh iPad 13 inch
+    runs-on: macos-latest
+    steps:
+      - name: Lấy mã nguồn (checkout)
+        uses: actions/checkout@v4
+
+      - name: Cài Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Cài phụ thuộc npm (npm ci)
+        run: npm ci
+
+      - name: Sinh project iOS gốc (expo prebuild)
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Cài CocoaPods cho project iOS
+        working-directory: ios
+        run: pod install
+
+      - name: Xác định workspace và scheme Xcode
+        id: ios-project
+        working-directory: ios
+        run: |
+          WORKSPACE=$(ls -d *.xcworkspace | head -n1)
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+
+      - name: Build app cho simulator (xcodebuild -sdk iphonesimulator, KHÔNG ký số)
+        working-directory: ios
+        run: |
+          xcodebuild \
+            -workspace "${{ steps.ios-project.outputs.workspace }}" \
+            -scheme "${{ steps.ios-project.outputs.scheme }}" \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+
+      - name: Tìm .app vừa build cho simulator
+        id: app-path
+        working-directory: ios
+        run: |
+          APP_PATH=$(find build/Build/Products -iname "*.app" -path "*iphonesimulator*" | head -n1)
+          if [ -z "$APP_PATH" ]; then
+            echo "::error::Không tìm thấy .app cho iphonesimulator trong build/Build/Products"
+            exit 1
+          fi
+          echo "Đã tìm thấy: $APP_PATH"
+          echo "app_path=ios/$APP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Tạo simulator (tự dò device type + runtime iOS mới nhất đã cài, không hard-code UUID)
+        id: sim
+        run: |
+          DEVICE_TYPE=$(xcrun simctl list devicetypes \
+            | grep -F "${{ inputs.device_type_name }}" \
+            | grep -o 'com\.apple\.CoreSimulator\.SimDeviceType\.[A-Za-z0-9.-]*' \
+            | head -n1)
+          if [ -z "$DEVICE_TYPE" ]; then
+            echo "::error::Không tìm thấy device type '${{ inputs.device_type_name }}'. Xem 'xcrun simctl list devicetypes' và cập nhật input device_type_name."
+            xcrun simctl list devicetypes
+            exit 1
+          fi
+          echo "Device type: $DEVICE_TYPE"
+
+          RUNTIME=$(xcrun simctl list runtimes \
+            | grep -E "^iOS " \
+            | tail -n1 \
+            | grep -o 'com\.apple\.CoreSimulator\.SimRuntime\.[A-Za-z0-9.-]*')
+          if [ -z "$RUNTIME" ]; then
+            echo "::error::Không tìm thấy runtime iOS nào đã cài trên runner."
+            xcrun simctl list runtimes
+            exit 1
+          fi
+          echo "Runtime: $RUNTIME"
+
+          UDID=$(xcrun simctl create "CB-News-iPad13-Screenshot" "$DEVICE_TYPE" "$RUNTIME")
+          echo "UDID: $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Boot simulator và chờ sẵn sàng (bootstatus -b, đúng khuyến nghị dùng UDID cho CI)
+        run: |
+          xcrun simctl boot "${{ steps.sim.outputs.udid }}"
+          xcrun simctl bootstatus "${{ steps.sim.outputs.udid }}" -b
+
+      - name: Cài và mở app CB News trên simulator
+        run: |
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "${{ steps.app-path.outputs.app_path }}"
+          xcrun simctl launch "${{ steps.sim.outputs.udid }}" com.cbcentres.cbnews
+          sleep 8
+
+      - name: Chụp ảnh màn hình (độ phân giải điểm ảnh GỐC của thiết bị mô phỏng)
+        run: |
+          mkdir -p screenshots
+          xcrun simctl io "${{ steps.sim.outputs.udid }}" screenshot screenshots/ipad-13-inch-home.png
+
+      - name: Đo kích thước điểm ảnh vừa chụp (bằng chứng khớp 2064x2752 / 2752x2064 Apple yêu cầu)
+        run: sips -g pixelWidth -g pixelHeight screenshots/ipad-13-inch-home.png
+
+      - name: Tắt simulator
+        if: always()
+        run: xcrun simctl shutdown "${{ steps.sim.outputs.udid }}" || true
+
+      - name: Lưu ảnh chụp làm artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cb-news-ipad-13-inch-screenshot
+          path: screenshots/*.png
+          retention-days: 14
+          if-no-files-found: warn

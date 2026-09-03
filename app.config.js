@@ -62,6 +62,20 @@ module.exports = {
       // duyệt — nguyên văn: "You must upload a screenshot for 13-inch iPad displays".
       // App chưa từng được thiết kế hay kiểm trên iPad, và không có thiết bị iPad để chụp.
       // Khai iPhone-only là nói đúng thứ mình đã làm và đã kiểm.
+      //
+      // Task 311 (BLI 299, khảo sát iPad thật, 03/09/2026): vẫn giữ `false` — KHÔNG đảo lại
+      // quyết định 30/08 ở trên, chỉ bổ sung. Khảo sát tìm ra CÓ đường kỹ thuật lấy ảnh chụp
+      // iPad mà không cần iPad thật (runner CI `macos-latest` có sẵn simulator "iPad Pro
+      // 13-inch (M4)", `xcrun simctl io ... screenshot` chụp đúng 2752×2064/2064×2752 px —
+      // đúng kích thước App Store Connect đòi cho khe "13-inch iPad displays", nguồn
+      // developer.apple.com/help/app-store-connect/reference/screenshot-specifications và
+      // github.com/actions/runner-images) — xem `.github/workflows/capture-ipad-screenshot.yml`
+      // (workflow_dispatch, CHƯA chạy thử) và comment kế hoạch Task 311 trên Azure DevOps.
+      // Nhưng rào an toàn Task 311 cấm worker tự kích hoạt CI để đo, và máy KB không có
+      // Xcode/simulator để tự chạy cục bộ — nên "có đường" mới dừng ở mức tài liệu, CHƯA có
+      // bằng chứng chạy thật. Bật `true` ở đây trước khi PM tự chạy workflow trên và xác nhận
+      // ảnh đúng kích thước là lặp lại đúng lỗi 30/08 dưới dạng khác. Đổi thành `true` CHỈ sau
+      // khi có bằng chứng chạy thật đó.
       supportsTablet: false,
       bundleIdentifier: 'com.cbcentres.cbnews',
       buildNumber: IOS_BUILD_NUMBER,
