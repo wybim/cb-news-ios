@@ -71,12 +71,13 @@ module.exports = {
       // developer.apple.com/help/app-store-connect/reference/screenshot-specifications và
       // github.com/actions/runner-images) — xem `.github/workflows/capture-ipad-screenshot.yml`
       // (workflow_dispatch, CHƯA chạy thử) và comment kế hoạch Task 311 trên Azure DevOps.
-      // Nhưng rào an toàn Task 311 cấm worker tự kích hoạt CI để đo, và máy KB không có
-      // Xcode/simulator để tự chạy cục bộ — nên "có đường" mới dừng ở mức tài liệu, CHƯA có
-      // bằng chứng chạy thật. Bật `true` ở đây trước khi PM tự chạy workflow trên và xác nhận
-      // ảnh đúng kích thước là lặp lại đúng lỗi 30/08 dưới dạng khác. Đổi thành `true` CHỈ sau
-      // khi có bằng chứng chạy thật đó.
-      supportsTablet: false,
+      // BẰNG CHỨNG CHẠY THẬT ĐÃ CÓ (PM, 03/09/2026): chạy `capture-ipad-screenshot.yml` trên
+      // `main`, run 33728070813 — kết luận `success`, artifact ra `ipad-13-inch-home.png` đo
+      // được đúng **2064×2752**, khớp chính xác khe "iPad - 13\" Display" App Store Connect đòi.
+      // Ảnh lần đó cho thấy app chạy CHẾ ĐỘ TƯƠNG THÍCH iPhone (khung hẹp giữa hình nền iPad,
+      // đúng hình dạng ảnh người kiểm duyệt Apple gửi 01/09) — vì cờ này còn `false`. Đường
+      // chụp đã chứng minh, nên nay bật `true` rồi chụp lại để có ảnh iPad thật.
+      supportsTablet: true,
       bundleIdentifier: 'com.cbcentres.cbnews',
       buildNumber: IOS_BUILD_NUMBER,
       // Task 310 — ĐO ĐƯỢC THẬT: thiếu trường này, `expo prebuild` (chạy thử cục bộ trên máy
