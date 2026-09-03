@@ -31,6 +31,23 @@ function deriveGoogleIosUrlScheme(clientId) {
   return 'com.googleusercontent.apps.giu-cho-chua-cau-hinh';
 }
 
+// Task 310 (BLI 299, AD-20): App Group dùng CHUNG giữa app chính và widget extension
+// (`targets/widget/`) để chia sẻ đúng MỘT tệp ảnh chụp — app ghi, widget chỉ đọc.
+// Quy ước "group.<bundle identifier>" theo đúng ví dụ trong tài liệu chính thức của plugin
+// (`@bacons/apple-targets`, README mục "App Groups"). Chuỗi này PHẢI khớp nguyên văn với
+// hằng số `WIDGET_APP_GROUP_ID` trong `src/data/widgetSnapshot.ts` VÀ trường
+// `com.apple.security.application-groups` trong `targets/widget/expo-target.config.js`
+// — ba chỗ, một giá trị, không có cơ chế nào tự đồng bộ chúng cho nhau.
+//
+// `[GIẢ ĐỊNH — điểm chờ chủ dự án, F6]` App Group này phải được TẠO trên Apple Developer
+// portal (Certificates, Identifiers & Profiles → App Groups) và GẮN vào cả hai App ID
+// (`com.cbcentres.cbnews` và App ID của target widget) trước khi một bản build KÝ SỐ thật
+// (release-testflight.yml, CODE_SIGN_STYLE=Automatic + -allowProvisioningUpdates) có thể
+// chạy được — máy KB không có quyền vào Apple Developer portal nên KHÔNG xác nhận được đã
+// tồn tại hay chưa. Bản build KHÔNG ký số (build-ios.yml, CODE_SIGNING_ALLOWED=NO) không
+// đụng tới bước cấp quyền này nên không bị chặn bởi thiếu sót ở portal.
+const WIDGET_APP_GROUP_ID = 'group.com.cbcentres.cbnews';
+
 module.exports = {
   expo: {
     name: 'CB News',
@@ -48,6 +65,15 @@ module.exports = {
       supportsTablet: false,
       bundleIdentifier: 'com.cbcentres.cbnews',
       buildNumber: IOS_BUILD_NUMBER,
+      // Task 310 — ĐO ĐƯỢC THẬT: thiếu trường này, `expo prebuild` (chạy thử cục bộ trên máy
+      // KB, không cần Xcode cho riêng bước SINH project) in cảnh báo "[bacons/apple-targets]
+      // Expo config is missing required ios.appleTeamId property... iOS builds may fail until
+      // this is corrected." `ios.appleTeamId` là trường CHUẨN của chính Expo (không riêng gì
+      // plugin widget — xem `@expo/config-types` `ExpoConfig.ios.appleTeamId`). Giá trị lấy
+      // NGUYÊN VĂN từ `release-testflight.yml` (`ASC_TEAM_ID`) — cùng một Team ID, đã có sẵn
+      // trong repo, KHÔNG phải bí mật (comment tại đó: "hiện công khai trên mọi provisioning
+      // profile của app").
+      appleTeamId: 'TGGA9S73LD',
       // Task 268 (đợt 5a): app chỉ gọi HTTPS tiêu chuẩn (TLS có sẵn của hệ điều hành,
       // không tự cài thuật toán mã hoá riêng) nên khai "không dùng mã hoá phải khai báo
       // xuất khẩu" ngay trong app.config.js. Thiếu khai báo này thì bản build đứng chờ
@@ -57,6 +83,12 @@ module.exports = {
       // docs.expo.dev/versions/v57.0.0/config/app/ (mục ios.config.usesNonExemptEncryption).
       config: {
         usesNonExemptEncryption: false,
+      },
+      // Task 310 (AD-20): App Group để chia sẻ ảnh chụp tin tức với widget — KHÔNG chứa
+      // bất cứ khoá nào khác ngoài App Group này (không mở rộng phạm vi entitlements ngoài
+      // đúng thứ widget cần).
+      entitlements: {
+        'com.apple.security.application-groups': [WIDGET_APP_GROUP_ID],
       },
     },
     android: {
@@ -96,6 +128,13 @@ module.exports = {
       // `'fetch'` vào `UIBackgroundModes`, KHÔNG có `BGTaskSchedulerPermittedIdentifiers`.
       // Không cấu hình gì thêm (không tuỳ chọn nào để truyền).
       'expo-background-fetch',
+      // Task 310 (BLI 299, AD-20/F5): thêm target widget (`targets/widget/`) vào project
+      // Xcode lúc `expo prebuild` — plugin tự đọc `targets/widget/expo-target.config.js`,
+      // KHÔNG cần khai gì thêm ở đây. Nguồn: README `@bacons/apple-targets`
+      // (github.com/EvanBacon/expo-apple-targets/blob/main/packages/apple-targets/README.md)
+      // — plugin hoạt động với `expo prebuild` thuần (đúng bước CI hiện có ở build-ios.yml/
+      // release-testflight.yml), không cần EAS Build.
+      '@bacons/apple-targets',
     ],
   },
 };
