@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -19,14 +19,17 @@ import { formatVietnameseDate } from '../utils/formatDate';
 import { useSavedArticles, type SavedArticle } from '../data/savedArticles';
 import { loadHomeSectionsData } from '../data/homeData';
 import { buildHomeSections, formatSyncTime, type HomeSectionsInput } from '../state/homeSections';
-import { homeListColumns, resolveHomeLayoutMetrics, resolveHomeLayoutMode } from '../state/homeLayout';
+import {
+  homeListColumns,
+  resolveHomeInitialPostCount,
+  resolveHomeLayoutMetrics,
+  resolveHomeLayoutMode,
+} from '../state/homeLayout';
 import { buildSavedSearchViewState } from '../state/savedArticlesSearch';
 import { isSignedIn } from '../state/accessPolicy';
 import type { AccountState } from '../state/accountStore';
 import { triggerManualRefresh } from '../background/manualRefresh';
 import { markHomeContentReady } from '../utils/ciReadySignal';
-
-const PER_PAGE = 10;
 
 type Tab = 'latest' | 'saved';
 
@@ -71,13 +74,21 @@ export function NewsListScreen({
 }) {
   // Task 311 — cách xếp theo bề rộng (`homeLayout.ts`, hàm thuần). `useWindowDimensions()` tự
   // cập nhật khi xoay máy hoặc đổi cỡ split-view trên iPad, không cần tự đăng ký listener.
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const layoutMode = resolveHomeLayoutMode(width);
   const listColumns = homeListColumns(layoutMode);
   // Task 312 — mép ngang rộng hơn ở bề rộng iPad (`homeLayout.ts`, hàm thuần), áp cho
   // header/tabs/lưới danh sách để nội dung không dán sát mép trên khung 2064pt (ảnh chụp
   // thật lộ vấn đề này, xem work item 299).
   const { horizontalPadding } = resolveHomeLayoutMetrics(layoutMode);
+  // Task 312 vòng 2 — số bài tải MỖI TRANG, tính theo layout thật (`homeLayout.ts`, hàm
+  // thuần) để danh sách lấp+tràn màn iPad ngay từ trang đầu (ảnh run 2: 10 bài chỉ ra 5 hàng
+  // 2 cột, không lấp nổi khung cao, khiến `onEndReached` phát ngay và lộ vòng xoay chân
+  // danh sách + 35,5% màn dưới trắng). CỐ ĐỊNH bằng ref cho SUỐT vòng đời màn hình, tính một
+  // lần từ layout lúc mount — KHÔNG đổi giữa các trang: WordPress REST API tính offset theo
+  // `per_page` của TỪNG lần gọi, đổi per_page giữa hai trang làm lệch offset, gây trùng hoặc
+  // hụt bài giữa hai trang liên tiếp.
+  const pageSizeRef = useRef(resolveHomeInitialPostCount(layoutMode, height));
 
   const [tab, setTab] = useState<Tab>('latest');
   const [posts, setPosts] = useState<PostSummary[]>([]);
@@ -92,7 +103,7 @@ export function NewsListScreen({
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchNewsPage(nextPage, PER_PAGE);
+      const result = await fetchNewsPage(nextPage, pageSizeRef.current);
       setPosts((prev) => (replace ? result.posts : [...prev, ...result.posts]));
       setPage(result.page);
       // Đọc totalPages TỪ CHÍNH lần gọi này mỗi lần — không hard-code (bẫy brief Task 267).
@@ -101,18 +112,16 @@ export function NewsListScreen({
       setError(err instanceof NewsApiError ? err.message : 'Có lỗi khi tải danh sách bài.');
     } finally {
       setLoading(false);
+      // Task 312 vòng 2: ghi dấu hiệu ở MỌI lần settle (đầu tiên, phân trang, làm mới) —
+      // không chỉ lần đầu. Ảnh run 2 lộ ra một lượt phân trang có thể còn bay lúc chụp dù
+      // lần tải đầu đã xong; workflow giờ dò tới khi tệp NGỪNG đổi (đứng yên), không chỉ tới
+      // khi tệp xuất hiện lần đầu — xem `capture-ipad-screenshot.yml`.
+      markHomeContentReady();
     }
   }, []);
 
-  // Task 312: khi lần tải danh sách ĐẦU TIÊN (do mount, không phải làm mới/phân trang) đã
-  // settle — thành công hay lỗi đều tính, cả hai đều tắt vòng xoay giữa màn — ghi dấu hiệu
-  // cho workflow chụp ảnh iPad biết mà chụp (`ciReadySignal.ts`). Không gọi ở `onRefresh`/
-  // `onEndReached`/`handleManualRefresh`: chỉ lần đầu mới ứng với cảnh vòng xoay giữa màn
-  // đã thấy ở ảnh chụp lần trước.
   useEffect(() => {
-    void loadPage(1, true).then(() => {
-      markHomeContentReady();
-    });
+    void loadPage(1, true);
   }, [loadPage]);
 
   const onRefresh = useCallback(async () => {
