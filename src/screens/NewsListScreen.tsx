@@ -19,11 +19,12 @@ import { formatVietnameseDate } from '../utils/formatDate';
 import { useSavedArticles, type SavedArticle } from '../data/savedArticles';
 import { loadHomeSectionsData } from '../data/homeData';
 import { buildHomeSections, formatSyncTime, type HomeSectionsInput } from '../state/homeSections';
-import { homeListColumns, resolveHomeLayoutMode } from '../state/homeLayout';
+import { homeListColumns, resolveHomeLayoutMetrics, resolveHomeLayoutMode } from '../state/homeLayout';
 import { buildSavedSearchViewState } from '../state/savedArticlesSearch';
 import { isSignedIn } from '../state/accessPolicy';
 import type { AccountState } from '../state/accountStore';
 import { triggerManualRefresh } from '../background/manualRefresh';
+import { markHomeContentReady } from '../utils/ciReadySignal';
 
 const PER_PAGE = 10;
 
@@ -73,6 +74,10 @@ export function NewsListScreen({
   const { width } = useWindowDimensions();
   const layoutMode = resolveHomeLayoutMode(width);
   const listColumns = homeListColumns(layoutMode);
+  // Task 312 — mép ngang rộng hơn ở bề rộng iPad (`homeLayout.ts`, hàm thuần), áp cho
+  // header/tabs/lưới danh sách để nội dung không dán sát mép trên khung 2064pt (ảnh chụp
+  // thật lộ vấn đề này, xem work item 299).
+  const { horizontalPadding } = resolveHomeLayoutMetrics(layoutMode);
 
   const [tab, setTab] = useState<Tab>('latest');
   const [posts, setPosts] = useState<PostSummary[]>([]);
@@ -99,8 +104,15 @@ export function NewsListScreen({
     }
   }, []);
 
+  // Task 312: khi lần tải danh sách ĐẦU TIÊN (do mount, không phải làm mới/phân trang) đã
+  // settle — thành công hay lỗi đều tính, cả hai đều tắt vòng xoay giữa màn — ghi dấu hiệu
+  // cho workflow chụp ảnh iPad biết mà chụp (`ciReadySignal.ts`). Không gọi ở `onRefresh`/
+  // `onEndReached`/`handleManualRefresh`: chỉ lần đầu mới ứng với cảnh vòng xoay giữa màn
+  // đã thấy ở ảnh chụp lần trước.
   useEffect(() => {
-    void loadPage(1, true);
+    void loadPage(1, true).then(() => {
+      markHomeContentReady();
+    });
   }, [loadPage]);
 
   const onRefresh = useCallback(async () => {
@@ -177,7 +189,7 @@ export function NewsListScreen({
 
   return (
     <View style={styles.container}>
-      <View style={styles.homeHeader}>
+      <View style={[styles.homeHeader, { paddingHorizontal: horizontalPadding }]}>
         <View style={styles.homeHeaderTitleRow}>
           <Text style={styles.homeHeaderTitle}>Dành cho bạn</Text>
           <Pressable onPress={() => void handleManualRefresh()} hitSlop={12} disabled={manualRefreshing}>
@@ -267,7 +279,7 @@ export function NewsListScreen({
         </View>
       </View>
 
-      <View style={styles.tabs}>
+      <View style={[styles.tabs, { paddingHorizontal: horizontalPadding }]}>
         <Pressable
           style={[styles.tabButton, tab === 'latest' && styles.tabButtonActive]}
           onPress={() => setTab('latest')}
@@ -314,7 +326,11 @@ export function NewsListScreen({
           key={`list-${listColumns}`}
           data={data}
           numColumns={listColumns}
-          columnWrapperStyle={listColumns > 1 ? styles.listColumnWrapper : undefined}
+          columnWrapperStyle={
+            listColumns > 1
+              ? [styles.listColumnWrapper, { paddingHorizontal: horizontalPadding }]
+              : undefined
+          }
           keyExtractor={(item) => String(item.id)}
           renderItem={({ item }) => (
             <ArticleRow

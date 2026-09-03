@@ -5,7 +5,12 @@
  * ngược chiều, không phải một tiêu chí luôn đạt (rào bảy điều nhấn lại #6 của brief).
  */
 
-import { homeListColumns, resolveHomeLayoutMode, TWO_COLUMN_MIN_WIDTH } from '../homeLayout';
+import {
+  homeListColumns,
+  resolveHomeLayoutMetrics,
+  resolveHomeLayoutMode,
+  TWO_COLUMN_MIN_WIDTH,
+} from '../homeLayout';
 
 describe('resolveHomeLayoutMode', () => {
   it('bề rộng iPhone (portrait, kể cả máy to nhất hiện có ~430pt) → single', () => {
@@ -31,5 +36,14 @@ describe('homeListColumns', () => {
   it('single → 1 cột, twoColumn → 2 cột', () => {
     expect(homeListColumns('single')).toBe(1);
     expect(homeListColumns('twoColumn')).toBe(2);
+  });
+});
+
+describe('resolveHomeLayoutMetrics', () => {
+  it('Task 312: twoColumn dùng mép rộng hơn single — ảnh chụp thật lộ mép 16pt của iPhone dán sát trên khung iPad', () => {
+    expect(resolveHomeLayoutMetrics('single').horizontalPadding).toBe(16);
+    expect(resolveHomeLayoutMetrics('twoColumn').horizontalPadding).toBeGreaterThan(
+      resolveHomeLayoutMetrics('single').horizontalPadding,
+    );
   });
 });

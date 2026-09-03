@@ -30,3 +30,23 @@ export function resolveHomeLayoutMode(width: number): HomeLayoutMode {
 export function homeListColumns(mode: HomeLayoutMode): 1 | 2 {
   return mode === 'twoColumn' ? 2 : 1;
 }
+
+/**
+ * Task 312 (BLI 299) — ảnh chụp thật đầu tiên (`ipad-13-inch-home.png`, work item 299) lộ
+ * layout thưa: nội dung dùng NGUYÊN khoảng đệm mép 16pt của iPhone trên một khung rộng gấp
+ * hơn hai lần. `AD-21` không đổi (vẫn đúng 4 khối, không thêm màn/thư viện điều hướng) —
+ * đây chỉ là CÁCH XẾP LẠI cùng nội dung đó, không thêm dữ liệu, không thêm khối nào.
+ *
+ * `horizontalPadding` là khoảng đệm hai mép cho `homeHeader`/`tabs`/lưới danh sách — lớn
+ * hơn ở `twoColumn` để nội dung không dán sát mép trên khung rộng (một trong hai vấn đề
+ * F2/brief nêu). Số 32 không đo từ thiết bị thật (máy KB không có Xcode/simulator, F5) —
+ * `[GIẢ ĐỊNH]` chọn gấp đôi mép iPhone như một bước vừa phải, không phải hằng số Apple quy
+ * định; đổi lại dễ nếu ảnh chụp thật cho thấy cần khác.
+ */
+export type HomeLayoutMetrics = {
+  horizontalPadding: number;
+};
+
+export function resolveHomeLayoutMetrics(mode: HomeLayoutMode): HomeLayoutMetrics {
+  return { horizontalPadding: mode === 'twoColumn' ? 32 : 16 };
+}
