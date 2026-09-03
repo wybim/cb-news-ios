@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
 import type { PostDetail } from '../api/newsApi';
 import type { AccountProvider } from '../state/accountStore';
+import { accountPartition, buildPartitionStorageKey } from './localPartitions';
 
 /**
  * Lớp trạng thái "bài đã lưu để đọc offline" — MỘT NGUỒN SỰ THẬT DUY NHẤT, cùng khuôn với
@@ -20,6 +21,12 @@ import type { AccountProvider } from '../state/accountStore';
  * (`buildSavedArticlesStorageKey`), và `LOCAL_USER_DATA_KEYS` (`src/data/localUserData.ts`)
  * không còn khai khoá này tĩnh — `clearAllLocalUserData()` tính khoá của tài khoản đang bị
  * xoá tại chỗ gọi.
+ *
+ * Task 301: kho này CHỈ giữ phân vùng TÀI KHOẢN (lớp phủ, chỉ khi đã đăng nhập — `AD-19`).
+ * `buildSavedArticlesStorageKey()` giờ là một lớp mỏng gọi `buildPartitionStorageKey()` +
+ * `accountPartition()` ở `localPartitions.ts` — CÙNG một cơ chế đặt tên khoá mà phân vùng
+ * THIẾT BỊ (mới, dùng cho các tính năng không cần đăng nhập) cũng dùng, không dựng cơ chế
+ * lưu trữ thứ hai (`F1`). Định dạng khoá trả về giữ NGUYÊN VĂN như trước — hành vi không đổi.
  */
 
 /** Khoá CŨ dùng chung mọi tài khoản (trước Task 284) — chỉ dùng để DỌN MỘT LẦN (F6), không
@@ -37,7 +44,7 @@ export const SAVED_ARTICLES_STORAGE_KEY_PREFIX = LEGACY_SHARED_STORAGE_KEY;
  * và có thể rỗng (F1, brief Task 284).
  */
 export function buildSavedArticlesStorageKey(provider: AccountProvider, providerUserId: string): string {
-  return `${SAVED_ARTICLES_STORAGE_KEY_PREFIX}.${provider}:${providerUserId}`;
+  return buildPartitionStorageKey(SAVED_ARTICLES_STORAGE_KEY_PREFIX, accountPartition({ provider, providerUserId }));
 }
 
 export type SavedArticle = PostDetail & {
