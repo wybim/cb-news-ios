@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { fetchPostDetail, NewsApiError, type PostDetail } from '../api/newsApi';
 import { savedArticlesStore, useSavedArticles } from '../data/savedArticles';
+import { useAccountState } from '../state/accountStore';
+import { isSignedIn } from '../state/accessPolicy';
 import { ArticleImage } from '../components/ArticleImage';
 import { InlineHtmlText, RenderedContentHtml } from '../components/RenderedHtml';
 import { formatVietnameseDate } from '../utils/formatDate';
@@ -10,8 +12,13 @@ import { formatVietnameseDate } from '../utils/formatDate';
  * Màn đọc bài — giao diện GỐC (không WebView). Mở bài luôn thử tải bản mới nhất từ mạng;
  * nếu mất mạng VÀ bài đã được lưu offline trước đó thì hiện bản đã lưu kèm banner báo rõ —
  * đây là phần chứng minh app làm được thứ trang web không làm được (Guideline 4.2.2).
+ *
+ * HV2 (Task 298, Guideline 5.1.1(v)): đọc toàn văn bài KHÔNG cần đăng nhập — đường tải/hiển
+ * thị bài trên KHÔNG có và không được thêm điều kiện theo tài khoản. HV3: chỉ hành động LƯU
+ * bài (`handleToggleSave`) mới kiểm `isSignedIn()`, vì lưu bài offline gắn tài khoản (F2).
  */
 export function ArticleScreen({ postId, onBack }: { postId: number; onBack: () => void }) {
+  const account = useAccountState();
   const savedMap = useSavedArticles();
   const savedCopy = savedMap[postId] ?? null;
   const isSaved = savedArticlesStore.isSaved(postId);
@@ -54,13 +61,24 @@ export function ArticleScreen({ postId, onBack }: { postId: number; onBack: () =
 
   const handleToggleSave = useCallback(async () => {
     if (!detail) return;
+    // HV3: chưa đăng nhập → mời đăng nhập TẠI CHỖ (Alert, không điều hướng đi đâu), bỏ qua
+    // được, và bỏ qua thì đọc tin tiếp tục bình thường. Không lưu vô danh (F2, rào an toàn 3).
+    if (!isSignedIn(account)) {
+      Alert.alert(
+        'Cần đăng nhập để lưu bài',
+        'Bài lưu đọc offline thuộc về tài khoản của bạn. Đăng nhập ở mục Tài khoản để lưu, ' +
+          'hoặc bỏ qua và tiếp tục đọc bình thường.',
+        [{ text: 'Đã hiểu', style: 'cancel' }],
+      );
+      return;
+    }
     if (isSaved) {
       await savedArticlesStore.removeArticle(postId);
     } else {
       await savedArticlesStore.saveArticle(detail);
       Alert.alert('Đã lưu', 'Bài viết đã được lưu để đọc khi mất mạng.');
     }
-  }, [detail, isSaved, postId]);
+  }, [detail, isSaved, postId, account]);
 
   if (loading) {
     return (

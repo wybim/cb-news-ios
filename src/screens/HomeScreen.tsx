@@ -1,19 +1,24 @@
 import React, { useState } from 'react';
 import { Alert, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
-import type { SignedInAccount } from '../state/accountStore';
+import type { AccountState } from '../state/accountStore';
+import { isSignedIn } from '../state/accessPolicy';
 import { signOutCurrentSession } from '../auth/signOutSession';
 import { deleteAccount } from '../auth/deleteAccount';
 import { NewsListScreen } from './NewsListScreen';
 import { ArticleScreen } from './ArticleScreen';
+import { LoginScreen } from './LoginScreen';
 
 /**
- * Shell điều hướng nội bộ sau đăng nhập — tin tức ↔ đọc bài ↔ tài khoản. Không dùng thư viện
- * điều hướng (react-navigation...): chỉ 3 màn, một state cục bộ là đủ, tránh thêm phụ thuộc
- * nặng (react-native-screens, gesture-handler...) chưa cần thiết ở quy mô app này (Task 267).
+ * Shell điều hướng nội bộ — tin tức ↔ đọc bài ↔ tài khoản. Từ Task 298 (Guideline
+ * 5.1.1(v)): mount BẤT KỂ trạng thái đăng nhập (App.tsx chỉ còn tách 'loading' lúc đang
+ * hydrate, xem accessPolicy.ts) — tin tức và đọc bài không gắn tài khoản, chỉ mục Tài khoản
+ * bên dưới rẽ nhánh theo `isSignedIn()`. Không dùng thư viện điều hướng (react-navigation...):
+ * chỉ 3 màn, một state cục bộ là đủ, tránh thêm phụ thuộc nặng (react-native-screens,
+ * gesture-handler...) chưa cần thiết ở quy mô app này (Task 267).
  */
 type Route = { name: 'news' } | { name: 'article'; postId: number } | { name: 'account' };
 
-export function HomeScreen({ account }: { account: SignedInAccount }) {
+export function HomeScreen({ account }: { account: AccountState }) {
   const [route, setRoute] = useState<Route>({ name: 'news' });
 
   return (
@@ -42,7 +47,12 @@ export function HomeScreen({ account }: { account: SignedInAccount }) {
   );
 }
 
-function AccountPanel({ account, onBack }: { account: SignedInAccount; onBack: () => void }) {
+/**
+ * HV4/HV5 (Task 298): `isSignedIn(account)` sai → guest, chỉ thấy hai nút đăng nhập
+ * Apple/Google của `LoginScreen`, KHÔNG thấy đăng xuất/xoá tài khoản. Đúng → giữ nguyên
+ * bảng tài khoản hiện tại — không đổi gì ở nhánh này so với trước Task 298.
+ */
+function AccountPanel({ account, onBack }: { account: AccountState; onBack: () => void }) {
   const handleSignOut = () => {
     void signOutCurrentSession();
   };
@@ -73,20 +83,24 @@ function AccountPanel({ account, onBack }: { account: SignedInAccount; onBack: (
         <Text style={styles.accountBackLink}>‹ Quay lại tin tức</Text>
       </Pressable>
 
-      <View style={styles.accountBody}>
-        <Text style={styles.title}>Xin chào, {account.displayName}</Text>
-        <Text style={styles.meta}>
-          Đăng nhập bằng {account.provider === 'apple' ? 'Apple' : 'Google'}
-        </Text>
+      {isSignedIn(account) ? (
+        <View style={styles.accountBody}>
+          <Text style={styles.title}>Xin chào, {account.displayName}</Text>
+          <Text style={styles.meta}>
+            Đăng nhập bằng {account.provider === 'apple' ? 'Apple' : 'Google'}
+          </Text>
 
-        <Pressable style={styles.button} onPress={handleSignOut}>
-          <Text style={styles.buttonText}>Đăng xuất</Text>
-        </Pressable>
+          <Pressable style={styles.button} onPress={handleSignOut}>
+            <Text style={styles.buttonText}>Đăng xuất</Text>
+          </Pressable>
 
-        <Pressable style={[styles.button, styles.dangerButton]} onPress={confirmDelete}>
-          <Text style={[styles.buttonText, styles.dangerText]}>Xoá tài khoản</Text>
-        </Pressable>
-      </View>
+          <Pressable style={[styles.button, styles.dangerButton]} onPress={confirmDelete}>
+            <Text style={[styles.buttonText, styles.dangerText]}>Xoá tài khoản</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <LoginScreen />
+      )}
     </View>
   );
 }
